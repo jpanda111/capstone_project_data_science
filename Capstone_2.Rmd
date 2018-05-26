@@ -1,0 +1,824 @@
+---
+title: "Milestone Report"
+author: "jpanda111"
+date: "May 7, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(tidy = TRUE, fig.path = 'figure/', comment = NA, message = FALSE, fig.keep = 'high', fig.width = 10, fig.height = 6, fig.align = 'center', cache.extra = packageVersion('tufte'), echo = TRUE, progress = TRUE,cache=FALSE)
+# increase heap space before loading any rJava package like RWeka
+library(R.utils)
+set.seed(12345)
+library(ggplot2)
+library(gridExtra)
+library(stringi, quietly=TRUE)
+#library('tidyverse')
+#library('tokenizers')
+library('parallel')
+library('doParallel')
+library("tm")
+library("wordcloud")
+library("formatR")
+library("quanteda")
+library("devtools")
+library("spacyr") # python installed for spacyr package, which used for part-of-speech tagging, entity recognition, dependency parsing
+library("readtext")
+library("data.table")
+#devtools::install_github("quanteda/quanteda.corpora")
+```
+
+```{r parallelProcessing}
+library(parallel)
+library(foreach)
+library(doParallel)
+
+startParallelProcessing <- function() {
+  noofCores <- detectCores() - 1
+  cluster <- makeCluster(noofCores)
+  registerDoParallel(cluster)
+  cluster
+}
+
+stopParallelProcessing <- function(cluster) {
+  stopCluster(cluster)
+  stopImplicitCluster()
+}
+```
+
+### Background
+#####The capstone project is to build up a prediction algorithm in natural language processing and make predictions of words utilizing the provided text data from twitter, blog and news site.
+#####Basic idea is to predict the most probably next word given the prior sequence of words. The prediction will be based on N-gram model (a type of probabilistic language model for predicting the next word based on previous (n-1) words). 
+#####This report is to present summary statistics based on the following steps:
+ - Get familiar with the databases and do the necessary cleaning
+ - Identify appropriate tokens such as words, punctuation, and numbers.
+ - Remove profanity and other words do not want to predict.
+ - Exploratory analysis of the data, understanding the distribution of words and relationship between the words in the corpora.
+ - Build figures and tables to understand variation in the frequencies of words and word pairs in the data.
+ - Build a basic n-gram model for predicting the next word based on the previous 1, 2, 3 or (n-1) words.
+ 
+#####It will also provide the summary of plans for creating the prediction algorithm and Shiny App.
+
+### Data acquisition and cleaning
+#####First, setup automatically download data and unzip it. Also downloaded necessary files for clean up.
+
+```{r download_clean_data}
+if (!file.exists("./data/final/en_US")) {
+  dir.create("./data", showWarnings = FALSE)
+  des <- "./data/Coursera-SwiftKey.zip"
+  src <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+  download.file(src,des)
+  unzip(des, exdir = "./data")
+  rm(des, src)
+}
+
+if (!file.exists("./data/profanity.txt")) {
+  download.file("https://www.cs.cmu.edu/~biglou/resources/bad-words.txt", destfile = "./data/profanity.txt")
+}
+```
+
+### Exploratory analysis
+#####The basic idea is to speed up the efficiency while still keep the reasonable representation of the raw data.
+- Import the raw data, sample it based on percentage and save temporary file into workspace for reproducible research.
+- Summarise the data, extract basic data info like line counts, word counts, size info
+- Make a clean corpus by removing unnecessary words, numbers, punctuations and white space.
+
+```{r import_data}
+if (!file.exists("./data/en_US.raw.RData")) {
+  # reading raw data
+  importdata <- function(filename) {
+  con <- file(filename,open = 'rb')
+  data <- readLines(con, encoding = "UTF-8", skipNul = TRUE)
+  close(con)
+  data
+  }
+  # import the data
+  news <-importdata("./data/final/en_US/en_US.news.txt")
+  blogs <- importdata("./data/final/en_US/en_US.blogs.txt")
+  twitter <- importdata("./data/final/en_US/en_US.twitter.txt")
+  # save temporary files inside data folder
+  save (news, blogs, twitter, file= "./data/en_US.raw.RData", compress=TRUE, ascii=FALSE)
+  rm(news, blogs, twitter)
+  }
+```
+```{r sample_data}
+if (!file.exists("./data/en_US.sample.RData")) {
+  # sample function from raw data
+  percentage = .4
+  sampledata <- function(data, percentage) {
+  index <- sample(1:length(data), length(data)*percentage)
+  sample_data <- data[index]
+  sample_data
+  }
+  # sample the data
+  load("./data/en_US.raw.RData")
+  
+  sample_blogs <- sampledata(blogs,percentage)
+  sample_twitter <- sampledata(twitter,percentage)
+  sample_news <- sampledata(news, percentage)
+  sample_total <- c(sample_blogs, sample_twitter, sample_news)
+  
+  save (sample_blogs, sample_twitter, sample_news, sample_total, file= "./data/en_US.sample.RData", compress=TRUE, ascii=FALSE)
+  
+  # summarise the basic data info
+  Summarisedata <- function(data) {
+  size <- object.size(data)/1024/1024
+  length <- length(data)
+  words <- sum(stri_count_words(data))
+  data.frame(
+    fileSize = round(as.integer(size), digit=2),
+    lineCount = length,
+    wordCount = words
+  )
+  }
+  # explore the basic data info
+  newsinfo <- Summarisedata(news)
+  blogsinfo <- Summarisedata(blogs)
+  twitterinfo <- Summarisedata(twitter)
+  samplenewsinfo <- Summarisedata(sample_news)
+  sampleblogsinfo <- Summarisedata(sample_blogs)
+  sampletwitterinfo <- Summarisedata(sample_twitter)
+  sampletotalinfo <- Summarisedata(sample_total)
+  Summarydata <- data.frame(
+    fileName = c("News","Blogs","Twitter","Sample News", "Sample Blogs", "Sample Twitter", "Sample Total"),
+    rbind(newsinfo, blogsinfo, twitterinfo, samplenewsinfo, sampleblogsinfo, sampletwitterinfo, sampletotalinfo))
+  colnames(Summarydata) <- c("File Name", "File Size in Megabyte", "Line Count", "Word Count")
+  # save temporary files inside data folder
+  save (Summarydata, file= "./data/en_US.summary.RData", compress=TRUE, ascii=FALSE)
+  #write.csv(sample_total, "./data/sample_total.csv")
+  write.csv(Summarydata, "./data/Summarydata.csv")
+  rm(sample_blogs, sample_twitter, sample_news, sample_total, Summarydata)
+  rm(news,blogs,twitter)
+  gc()
+}
+```
+
+```{r train_test_dataset}
+if (!file.exists("./data/en_US.Train.RData")){
+  load("./data/en_US.raw.RData")
+makeTraindata <- function(data) {
+  set.seed(1234)
+  result = list()
+  m <- length(data)
+  #randomize the order
+  randomdata <- sample(data, m)
+  TR <- round(0.6 * m)
+  result$Train <- randomdata[1:TR]
+  left <- randomdata[-(1:TR)]
+  DEV <- round(0.5 * length(left))
+  result$HoldOut <- left[1:DEV]
+  result$Test <- left[-(1:DEV)]
+  result
+}
+  # seperate Train/HoldOut/Test data set and store in disk
+  twitterdataset <- makeTraindata(twitter)
+  twitterTrain <- twitterdataset$Train
+  saveRDS(twitterTrain, "./data/en_US.twitter.Train.rds", ascii=FALSE, compress=TRUE)
+  rm(twitterTrain); gc()
+  twitterTest <- twitterdataset$Test
+  twitterHoldout <- twitterdataset$HoldOut
+  saveRDS(twitterTest, "./data/en_US.twitter.Test.rds", ascii=FALSE, compress=TRUE)
+  saveRDS(twitterHoldout, "./data/en_US.twitter.Holdout.rds", ascii=FALSE, compress=TRUE)
+  rm(twitterTest, twitterHoldout, twitterdataset); gc()
+  
+  blogsdataset <- makeTraindata(blogs)
+  blogsTrain <- blogsdataset$Train
+  saveRDS(blogsTrain, "./data/en_US.blogs.Train.rds", ascii=FALSE, compress=TRUE)
+  rm(blogsTrain); gc()
+  blogsTest <- blogsdataset$Test
+  blogsHoldout <- blogsdataset$HoldOut
+  saveRDS(blogsTest, "./data/en_US.blogs.Test.rds", ascii=FALSE, compress=TRUE)
+  saveRDS(blogsHoldout, "./data/en_US.blogs.Holdout.rds", ascii=FALSE, compress=TRUE)
+  rm(blogsTest, blogsHoldout, blogsdataset); gc()
+  
+  newsdataset <- makeTraindata(news)
+  newsTrain <- newsdataset$Train
+  saveRDS(newsTrain, "./data/en_US.news.Train.rds", ascii=FALSE, compress=TRUE)
+  rm(newsTrain); gc()
+  newsTest <- newsdataset$Test
+  newsHoldout <- newsdataset$HoldOut
+  saveRDS(newsTest, "./data/en_US.news.Test.rds", ascii=FALSE, compress=TRUE)
+  saveRDS(newsHoldout, "./data/en_US.news.Holdout.rds", ascii=FALSE, compress=TRUE)
+  rm(newsTest, newsHoldout, newsdataset); gc()
+}
+```
+
+
+### Statistical modeling
+#####Build up functions to find most frequency occuring words in the data. Use parameter n to determine different models such as uni-grams, bi-grams, and tri-grams. Also save data into .csv files for reproducible research.
+
+```{r clean_ngram_data_quanteda}
+
+if (!file.exists("./data/en_US.blogs.threeGramDT.rds")) {
+  
+  profanity <- readLines("./data/profanity.txt", encoding = "UTF-8", skipNul = TRUE)
+  chars <- c("\u0092","\u0093","\u0094", "\u0095","\u0096","\u0097")
+  
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  blogsTrain <- readRDS("./data/en_US.blogs.Train.rds")
+  Corpus <- corpus(blogsTrain)
+  tokens <- tokens(Corpus, remove_symbols=TRUE, remove_numbers=TRUE, remove_punct=TRUE, remove_twitter=TRUE, remove_url=TRUE, remove_separators=TRUE, remove_hyphens=TRUE)
+  gram <- tokens_ngrams(tokens, n=1)
+  v <- dfm(gram, remove = c(profanity, chars))
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  saveRDS(gramdt, "./data/en_US.blogs.oneGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(v, gram, gramdt); gc()
+  gram <- tokens_ngrams(tokens, n=2)
+  v <- dfm(gram, remove = c(profanity, chars))
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  saveRDS(gramdt, "./data/en_US.blogs.twoGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(v, gram, gramdt); gc()
+  gram <- tokens_ngrams(tokens, n=3)
+  v <- dfm(gram, remove = c(profanity, chars))
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  saveRDS(gramdt, "./data/en_US.blogs.threeGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(v, gram, gramdt); gc()
+  rm(Corpus, tokens, blogsTrain); gc()
+  
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+}  
+  
+if (!file.exists("./data/en_US.news.threeGramDT.rds")) {
+
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  newsTrain <- readRDS("./data/en_US.news.Train.rds")
+  Corpus <- corpus(newsTrain)
+  tokens <- tokens(Corpus, remove_symbols=TRUE, remove_numbers=TRUE, remove_punct=TRUE, remove_twitter=TRUE, remove_url=TRUE, remove_separators=TRUE, remove_hyphens=TRUE)
+  gram <- tokens_ngrams(tokens, n=1)
+  v <- dfm(gram, remove = c(profanity, chars))
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  saveRDS(gramdt, "./data/en_US.news.oneGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(v, gram, gramdt); gc()
+  v <- dfm(gram, remove = c(profanity, chars))
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  gramdt <- data.table(word=names(v), freq=v, stringsAsFactors = FALSE)
+  saveRDS(gramdt, "./data/en_US.news.twoGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(v, gram, gramdt); gc()
+  gram <- tokens_ngrams(tokens, n=3)
+  v <- dfm(gram, remove = c(profanity, chars))
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  saveRDS(gramdt, "./data/en_US.news.threeGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(v, gram, gramdt); gc()
+  rm(Corpus, tokens); gc()
+  
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+}    
+
+if (!file.exists("./data/en_US.twitter.threeGramDT.rds")) {
+  
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  twitterTrain <- readRDS("./data/en_US.twitter.Train.rds")
+  Corpus <- corpus(twitterTrain)
+  tokens <- tokens(Corpus, remove_symbols=TRUE, remove_numbers=TRUE, remove_punct=TRUE, remove_twitter=TRUE, remove_url=TRUE, remove_separators=TRUE, remove_hyphens=TRUE)
+  gram <- tokens_ngrams(tokens, n=1)
+  v <- dfm(gram, remove = c(profanity, chars))
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  saveRDS(gramdt, "./data/en_US.twitter.oneGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(v, gram, gramdt); gc()
+  gram <- tokens_ngrams(tokens, n=2)
+  v <- dfm(gram, remove = c(profanity, chars))
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  saveRDS(gramdt, "./data/en_US.twitter.twoGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(v, gram, gramdt); gc()
+  gram <- tokens_ngrams(tokens, n=3)
+  v <- dfm(gram, remove = c(profanity, chars))
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  saveRDS(gramdt, "./data/en_US.twitter.threeGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(v, gram, gramdt); gc()
+  rm(Corpus, tokens, twitterTrain); gc()
+  
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+} 
+
+```
+```{r fourgram_dt}
+
+if (!file.exists("./data/en_US.blogs.fourGramDT.rds")) {
+  
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  blogsTrain <- readRDS("./data/en_US.blogs.Train.rds")
+  Corpus <- corpus(blogsTrain)
+  rm(blogsTrain); gc()
+  tokens <- tokens(Corpus, remove_symbols=TRUE, remove_numbers=TRUE, remove_punct=TRUE, remove_twitter=TRUE, remove_url=TRUE, remove_separators=TRUE, remove_hyphens=TRUE)
+  rm(Corpus); gc()
+  gram <- tokens_ngrams(tokens, n=4)
+  rm(tokens); gc()
+  v <- dfm(gram, remove = c(profanity, chars))
+  rm(gram); gc()
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  rm(v); gc()
+  saveRDS(gramdt, "./data/en_US.blogs.fourGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(gramdt); gc()
+
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+}
+
+if (!file.exists("./data/en_US.news.fourGramDT.rds")) {
+  
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  newsTrain <- readRDS("./data/en_US.news.Train.rds")
+  Corpus <- corpus(newsTrain)
+  rm(newsTrain); gc()
+  tokens <- tokens(Corpus, remove_symbols=TRUE, remove_numbers=TRUE, remove_punct=TRUE, remove_twitter=TRUE, remove_url=TRUE, remove_separators=TRUE, remove_hyphens=TRUE)
+  rm(Corpus); gc()
+  gram <- tokens_ngrams(tokens, n=4)
+  rm(tokens); gc()
+  v <- dfm(gram, remove = c(profanity, chars))
+  rm(gram); gc()
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  rm(v); gc()
+  saveRDS(gramdt, "./data/en_US.news.fourGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(gramdt); gc()
+
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+}
+
+if (!file.exists("./data/en_US.twitter.fourGramDT.rds")) {
+  
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  twitterTrain <- readRDS("./data/en_US.twitter.Train.rds")
+  Corpus <- corpus(twitterTrain)
+  rm(twitterTrain); gc()
+  tokens <- tokens(Corpus, remove_symbols=TRUE, remove_numbers=TRUE, remove_punct=TRUE, remove_twitter=TRUE, remove_url=TRUE, remove_separators=TRUE, remove_hyphens=TRUE)
+  rm(Corpus); gc()
+  gram <- tokens_ngrams(tokens, n=4)
+  rm(tokens); gc()
+  v <- dfm(gram, remove = c(profanity, chars))
+  rm(gram); gc()
+  gramdt <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+  rm(v); gc()
+  saveRDS(gramdt, "./data/en_US.twitter.fourGramDT.rds", ascii=FALSE, compress=TRUE)
+  rm(gramdt); gc()
+
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+}
+
+```
+```{r combined_data_table}
+if (!file.exists("./data/en_US.oneGramDT.rds")) {
+cluster <- startParallelProcessing()
+print(paste("START TIME:", Sys.time()))
+
+blogs3gram <- readRDS("./data/en_US.blogs.oneGramDT.rds")
+news3gram <- readRDS("./data/en_US.news.oneGramDT.rds")
+c <- merge(blogs3gram, news3gram, by="word", all=TRUE)
+rm(blogs3gram,news3gram); gc()
+c[,freq := sum(freq.x, freq.y, na.rm = TRUE), by=1:NROW(c)]
+c1 <- data.table(word=c$word, freq=c$freq)
+rm(c); gc()
+twitter3gram <- readRDS("./data/en_US.twitter.oneGramDT.rds")
+d <- merge(c1, twitter3gram, by="word", all=TRUE)
+rm(twitter3gram, c1); gc()
+d[,freq := sum(freq.x, freq.y, na.rm = TRUE), by=1:NROW(d)]
+d1 <- data.table(word=d$word, freq=d$freq)
+rm(d); gc()
+setorder(d1, -freq)
+saveRDS(d1, "./data/en_US.oneGramDT.rds", ascii=FALSE, compress=TRUE)
+rm(d1); gc()
+
+stopParallelProcessing(cluster)
+print(paste("END TIME:", Sys.time()))
+}
+
+if (!file.exists("./data/en_US.twoGramDT.rds")) {
+cluster <- startParallelProcessing()
+print(paste("START TIME:", Sys.time()))
+
+blogs3gram <- readRDS("./data/en_US.blogs.twoGramDT.rds")
+news3gram <- readRDS("./data/en_US.news.twoGramDT.rds")
+c <- merge(blogs3gram, news3gram, by="word", all=TRUE)
+rm(blogs3gram,news3gram); gc()
+c[,freq := sum(freq.x, freq.y, na.rm = TRUE), by=1:NROW(c)]
+c1 <- data.table(word=c$word, freq=c$freq)
+rm(c); gc()
+twitter3gram <- readRDS("./data/en_US.twitter.twoGramDT.rds")
+d <- merge(c1, twitter3gram, by="word", all=TRUE)
+rm(twitter3gram, c1); gc()
+d[,freq := sum(freq.x, freq.y, na.rm = TRUE), by=1:NROW(d)]
+d1 <- data.table(word=d$word, freq=d$freq)
+rm(d); gc()
+setorder(d1, -freq)
+d1[,w:=strsplit(word, "_[^_]+$")][]
+d1[,pred:=sub(".*_(.*)$","\\1", word)][]
+saveRDS(d1, "./data/en_US.twoGramDT.rds", ascii=FALSE, compress=TRUE)
+rm(d1); gc()
+
+stopParallelProcessing(cluster)
+print(paste("END TIME:", Sys.time()))
+}
+
+if (!file.exists("./data/en_US.threeGramDT.rds")) {
+cluster <- startParallelProcessing()
+print(paste("START TIME:", Sys.time()))
+
+blogs3gram <- readRDS("./data/en_US.blogs.threeGramDT.rds")
+news3gram <- readRDS("./data/en_US.news.threeGramDT.rds")
+c <- merge(blogs3gram, news3gram, by="word", all=TRUE)
+rm(blogs3gram,news3gram); gc()
+c[,freq := sum(freq.x, freq.y, na.rm = TRUE), by=1:NROW(c)]
+c1 <- data.table(word=c$word, freq=c$freq)
+rm(c); gc()
+twitter3gram <- readRDS("./data/en_US.twitter.threeGramDT.rds")
+d <- merge(c1, twitter3gram, by="word", all=TRUE)
+rm(twitter3gram, c1); gc()
+d[,freq := sum(freq.x, freq.y, na.rm = TRUE), by=1:NROW(d)]
+d1 <- data.table(word=d$word, freq=d$freq)
+rm(d); gc()
+l <- length(d1[[1]])
+m <- l/2
+d11 <- d1[1:m,]
+d22 <- d1[(m+1):l,]
+rm(d1); gc()
+setorder(d11, -freq)
+d11[,w:=strsplit(word, "_[^_]+$")][]
+d11[,pred:=sub(".*_(.*)$","\\1", word)][]
+saveRDS(d11, "./data/en_US.threeGramDT_1.rds", ascii=FALSE, compress=TRUE)
+rm(d11); gc()
+setorder(d22, -freq)
+d22[,w:=strsplit(word, "_[^_]+$")][]
+d22[,pred:=sub(".*_(.*)$","\\1", word)][]
+saveRDS(d22, "./data/en_US.threeGramDT_2.rds", ascii=FALSE, compress=TRUE)
+rm(d22); gc()
+
+stopParallelProcessing(cluster)
+print(paste("END TIME:", Sys.time()))
+}
+
+if (file.exists("./data/en_US.fourGramDT.rds")) {
+cluster <- startParallelProcessing()
+print(paste("START TIME:", Sys.time()))
+
+blogs3gram <- readRDS("./data/en_US.blogs.fourGramDT.rds")
+news3gram <- readRDS("./data/en_US.news.fourGramDT.rds")
+c <- merge(blogs3gram, news3gram, by="word", all=TRUE)
+rm(blogs3gram,news3gram); gc()
+c[,freq := sum(freq.x, freq.y, na.rm = TRUE), by=1:NROW(c)]
+c1 <- data.table(word=c$word, freq=c$freq)
+rm(c); gc()
+twitter3gram <- readRDS("./data/en_US.twitter.fourGramDT.rds")
+d <- merge(c1, twitter3gram, by="word", all=TRUE)
+rm(twitter3gram, c1); gc()
+d[,freq := sum(freq.x, freq.y, na.rm = TRUE), by=1:NROW(d)]
+d1 <- data.table(word=d$word, freq=d$freq)
+rm(d); gc()
+setorder(d1, -freq)
+d1[,w:=strsplit(word, "_[^_]+$")][]
+d1[,pred:=sub(".*_(.*)$","\\1", word)][]
+saveRDS(d1, "./data/en_US.fourGramDT.rds", ascii=FALSE, compress=TRUE)
+rm(d1); gc()
+
+stopParallelProcessing(cluster)
+print(paste("END TIME:", Sys.time()))
+}
+
+
+```
+
+### Explorary Plots
+#####Based on the statistical model we built, we can get frequencies of most common n-grams words in data sample.
+#####Plot the distribution of most common words to understand the relationship between the words in the corpora.
+- Compare top 100 most frequent bi or tri words depends on different data source: blogs, news, twitter or total. The comparison shows consistent results for most common words from different data source.
+- Compare different N-Gram models we built and see how most common words changes accordingly. The plot shows when n > 3, the changes of most common words flatten out.
+
+```{r explorary_plot_data}
+load("./data/en_US.oneGramDF.RData")
+load("./data/en_US.twoGramDF.RData")
+load("./data/en_US.threeGramDF.RData")
+load("./data/en_US.fourGramDF.RData")
+load("./data/en_US.fiveGramDF.RData")
+par(mfrow=c(1,3))
+dist <- 30
+plot(log10(onegramDF$Freq[1:dist]),ylab="log10(Frequency)", xlab = "Top 30 of 1-Grams", col="darkslateblue", ylim=c(.00001,6))
+plot(log10(twogramDF$Freq[1:dist]),ylab="log10(Frequency)", xlab = "Top 30 of 2-Grams", col="darkslateblue", ylim=c(.00001,6))
+plot(log10(threegramDF$Freq[1:dist]),ylab="log10(Frequency)", xlab = "Top 30 of 3-Grams", col="darkslateblue", ylim=c(.00001,6))
+par(mfrow = c(1,3))
+library(scales)
+scatter.smooth(log10(as.numeric(onefreqfreq$Var1)), log10(onefreqfreq$Freq), ylab = "log10 (freqency of freqency)", xlab = "log10 (unigram count)", col = alpha("black", 0.1), ylim = c(0.000001, 7), xlim = c(0.000001, 6))
+scatter.smooth(log10(as.numeric(twofreqfreq$Var1)), log10(twofreqfreq$Freq), ylab = "log10 (freqency of freqency)", xlab = "log10 (bigram count)", col = alpha("black", 0.1), ylim = c(0.000001, 7), xlim = c(0.000001, 6))
+scatter.smooth(log10(as.numeric(threefreqfreq$Var1)), log10(threefreqfreq$Freq), ylab = "log10 (freqency of freqency)", xlab = "log10 (trigram count)", col = alpha("black", 0.1), ylim = c(0.000001, 7), xlim = c(0.000001, 6))
+par(mfrow = c(1,1))
+suppressWarnings(wordcloud(onegramDF$Words, onegramDF$Freq, max.words = 100, colors = brewer.pal(6, "Dark2")))
+suppressWarnings(wordcloud(twogramDF$Words, twogramDF$Freq, max.words = 100, colors = brewer.pal(6, "Dark2")))
+suppressWarnings(wordcloud(threegramDF$Words, threegramDF$Freq, max.words = 100, colors = brewer.pal(6, "Dark2")))
+
+index <- 1:2000
+data <- data.frame()
+data <- rbind(data, data.frame(Freq = onegramDF[index,]$Freq, N=1, Index = index))
+data <- rbind(data, data.frame(Freq = twogramDF[index,]$Freq, N=2, Index = index))
+data <- rbind(data, data.frame(Freq = threegramDF[index,]$Freq, N=3, Index = index))
+data <- rbind(data, data.frame(Freq = fourgramDF[index,]$Freq, N=4, Index = index))
+data <- rbind(data, data.frame(Freq = fivegramDF[index,]$Freq, N=5, Index = index))
+ggplot(data, aes(x=Index, y=Freq, group=N, color=N)) +geom_line() + xlab("N-Grams (highest to lowest Frequency)") + ylab("log10(Frequency)") + ggtitle("Frequency versus N") + scale_y_log10()
+
+```
+
+```{r quiz_2}
+getlastwords <- function(txt, seperator = " ") {
+  lastwords <- c()
+  l = length(txt)
+  if (l != 0) {
+    for (i in 1:l) {
+      ele <- strsplit(txt[i], seperator)[[1]]
+      lastwords[i] <- ele[-1]
+  }}
+  lastwords
+}
+
+getlastNwords <- function(txt, n, seperator = " ") {
+  ele <- strsplit(txt, seperator)[[1]]
+  l <- length(ele)
+  if (l < n) stop("Text length smaller than n!")
+  else {
+    index <- l-n+1
+    ele <- ele[index:l]
+  }
+  lastNwords <- paste(ele, collapse = " ")
+  lastNwords <- tolower(lastNwords)
+  lastNwords
+}
+
+findmatchNgrams <- function(df, txt) {
+  df[grep(paste("^", txt, " ", sep = ""), df$Words, perl=TRUE), ][, c("Words")]
+}
+
+Suggestions <- function(inputTxt) {
+  suggestwords <- c()
+  ngrammodelnames <- c("fivegramDF","fourgramDF","threegramDF","twogramDF","onegramDF")
+  l1 <- length(ngrammodelnames)
+  l2 <- length(strsplit(inputTxt, " ")[[1]])
+  for (i in 1:l1) {
+    index <- 5-i
+    if (l2 < index) next
+    else {
+      if (i == 5) {
+        suggestwords <- c(suggestwords, get(ngrammodelnames[i])[1:3, "Words"])
+        print(suggestwords)
+      } else {
+        last <- getlastNwords(inputTxt, index)
+        print(last)
+        matched <- findmatchNgrams(get(ngrammodelnames[i]), last)
+        suggestwords <- c(suggestwords, getlastwords(matched))
+        print(suggestwords)
+      }
+    }
+  }
+  suggestwords <- subset(suggestwords, !(suggestwords %in% stopwords()))
+  suggestwords <- unique(suggestwords)
+  suggestwords[1:3]
+}
+
+q2 <- function() {
+  inputTxt <- c(
+    "The guy in front of me just bought a pound of bacon, a bouquet, and a case of",
+    "You're the reason why I smile everyday. Can you follow me please? It would mean the",
+    "Hey sunshine, can you follow me and make me the",
+    "Very early observations on the Bills game: Offense still struggling but the",
+    "Go on a romantic date at the",
+    "Well I'm pretty sure my granny has some old bagpipes in her garage I'll dust them off and be on my",
+    "Ohhhhh #PointBreak is on tomorrow. Love that film and haven't seen it in quite some",
+    "After the ice bucket challenge Louis will push his long wet hair out of his eyes with his little",
+    "Be grateful for the good times and keep the faith during the",
+    "If this isn't the cutest thing you've ever seen, then you must be"
+  )
+  for (i in 1:length(inputTxt)) {
+    answer <- paste("Q",i,": ", paste(Suggestions(inputTxt[i]),collapse = ","), sep = "")
+    print(answer)
+  }
+}
+```
+
+```{r transition matrix}
+
+```
+### Predictive modeling
+#####smoothing can almost always help performace, and for a relatively small effort. Find out the best smoothing method from the following:
+- Good-Turing estimate
+- Katz backoff
+- Witten-Bell smoothing
+- Absolute discounting
+- Jelinek-Mercer smoothing (interpolation)
+- Kneser-Ney smoothing
+
+```{r Good-Turing estimate}
+# build empty matrix
+GTCount<-matrix(c(seq(0,6,1),rep(0,28)),nrow=7,ncol=5,
+                dimnames = list(c(seq(0,6,1)),c("count","uni","bi","tri","four")))
+unigramL <- length(unigramDF$Uni)
+bigramL <- length(bigramDF$Biwords)
+trigramL <- length(trigramDF$Triwords)
+fourgramL <- length(fourgramDF$Fourwords)
+GTCount[1,2] <- uni.freqfreq[1,3]
+GTCount[2:7,2] <- uni.freqfreq[1:6,3]
+GTCount[1,3] <- unigramL^2 - bigramL # all the unseen bi's = all combination from uni's - seen bi's
+GTCount[2:7,3] <- bi.freqfreq[1:6,3]
+GTCount[1,4] <- unigramL^3 - trigramL
+GTCount[2:7,4] <- tri.freqfreq[1:6,3]
+GTCount[1,5] <- unigramL^4 - fourgramL
+GTCount[2:7,5] <- four.freqfreq[1:6,3]
+makeGTCount <- function(Count){
+  # choose k = 5 to avoid higher count = 0 case
+  kFactor <- (5+1)*Count[7]/Count[2]
+  for (c in 0:5){
+  num <- (c+1)*Count[c+2]/Count[c+1]-c*kFactor
+  Count[c+1] <- as.numeric(num/(1-kFactor))
+  }
+  Count
+}
+GTCount[,2] <- makeGTCount(GTCount[,2]) 
+GTCount[,3] <- makeGTCount(GTCount[,3])
+GTCount[,4] <- makeGTCount(GTCount[,4])
+GTCount[,5] <- makeGTCount(GTCount[,5])
+write.csv(GTCount, "GTCount.csv")
+```
+
+```{r prediction_model_support}
+GTCount <- read.csv("GTCount.csv")
+options(digits=4)
+cleanInput <- function(word){
+  ## this function cleans input, such as removing punctuation, spaces...
+  word <- tolower(word)
+  word <- gsub("[^[:alnum:][:space:]\']", "", word)
+  word <- gsub("^[ ]{1,10}", "", word)
+  word <- gsub("[ ]{2,10}", " ", word)
+  return(word)
+}
+
+## not use input?????
+buildTable <- function(input, subTri, cluster) {
+  ## this function takes cleaned input and a subset of seen tri-grams from training data, returns a list of tri-grams for display
+  diff = 0 #counter - counts diff in probabilities of rows
+  row.use=1 #counter - counts total rows to subset
+  size <- dim(subTri)[1]
+  if (size==1){
+    useTri <- subTri ## if only found one, simply return itself
+    return(useTri)
+  } else {          ## else build table of outputs
+    remain = size -1 #counter
+    while (diff < cluster && remain > 0){
+      if (subTri[row.use,2] - subTri[row.use+1,2] > 0.00001) 
+        diff = diff + 1
+        row.use <- row.use + 1
+        remain <- remain -1 # calculates when end of list is reached
+    }
+    if (remain == 0){ # when list is fully used
+      useTri <- subTri[1:row.use,]
+      return(useTri)
+    } else {          # if cluster reaches first
+      useTri <- subTri[1:row.use-1,]
+      return(useTri)
+    }
+  }
+}
+```
+## Main Prediction Function
+######This main prediction model will run against on test data. Here is the basic algorithm flow:
+- User input three words (3-gram) to predict function, it will return the prediction on the third word
+- Warning message will display if not input three words
+- Then the input will be searched inside trigram model's bigram look up table and subset it
+- If not found, use Katz backoff and search it in trigram model's unigram look up table and subset it
+- If Count <= 5, employ Good-Turing smoothing method
+- Predict next word based on probability, plot the dotchart and return it as data frame
+```{r prediction_model}
+predict <- function(input, cluster=7){
+  ## This function takes as input two words and uses that to enter lookup table to find the highest probability trigrams that result. It employs Good-Turing and Katz back off when conditions would suggest their use.
+  Katz = FALSE
+  gt = FALSE
+  input <- cleanInput(input)
+  inputSize <- length(strsplit(input, " ")[[1]])
+  if (inputSize !=3) 
+    stop("Please input exactly three words.\n", "Don't forget adding _ in between") # error handling
+  
+  input = gsub(" ","_", input)
+  fourgramDT <- readRDS("./data/en_US.blogs.fourGramDT.rds")
+  nCount <- sum(fourgramDT[which(fourgramDT$Word == input),2])
+  if (nCount == 0) { #bicount = 0 use Katz backoff
+    Katz = TRUE
+    input1 <- sub("_","@@@",input)
+    input1 <- sub(".*@@@","",input1) # isolates w2 as bigram, remove 1st word
+    nCount <- sum(threegramDF[which(threegramDT$Word == input1),2])
+    if (nCount ==0) {
+      input2 <- sub(".* ","",input) # isolates w3 as unigram, remove 2nd word
+      nCount <- sum(fourgramDF[which(fourgramDF$Uni == input2),2])
+      if (nCount ==0)
+        stop("Can't find this phrase in the n-gram data set")
+      
+      # Subset all recorded 2-grams that begin with unigram inside four-gram models
+      seekTri <- grepl(paste("^",input2,"$",sep=""),fourgramDF$Uni) # return truth table
+      subTri <- fourgramDF[seekTri,] # subset relevant outputs
+      # aggregation is key here otherwise multiple output words as 1st word removed
+      subTri <- aggregate(subTri$freq, list(subTri$w4),sum)
+      names(subTri) <- c("w4","freq")
+      subTri <- subTri[order(subTri$freq, decreasing = T),]
+      useTri <- buildTable(input, subTri, cluster)
+      for (i in 1:length(useTri$freq)){
+        count = useTri[i,2]
+        if (count <=5) { # employ good-turing smoothing
+          gt = TRUE
+          useTri[i,2] <- GTCount[count+1,3]
+        }
+      }
+    } else {
+      # Subset all recorded 3-grams that begin with bigram inside four-gram models
+      seekTri <- grepl(paste("^",input1,"$",sep=""),fourgramDF$Bi)
+      subTri <- fourgramDF[seekTri,]
+      subTri <- aggregate(subTri$freq,list(subTri$w4), sum)
+      names(subTri) <- c("w4","freq")
+      subTri <- subTri[order(subTri$freq, decreasing = T),]
+      useTri <- buildTable(input,subTri,cluster)
+      for (i in 1:length(useTri$freq)) {
+        count = useTri[i,2]
+        if (count <=5 ) {
+          gt = TRUE
+          useTri[i,2] <- GTCount[count+1,4]
+        }
+      }
+    }
+  } else {
+    # Subset all recorded 4-grams that begin with trigram inside four-gram models
+    seekTri <- grepl(paste("^",input,"$",sep=""),fourgramDF$Tri)
+    subTri <- fourgramDF[seekTri,]
+    subTri <- aggregate(subTri$freq,list(subTri$w4), sum)
+    names(subTri) <- c("w4","freq")
+    subTri <- subTri[order(subTri$freq, decreasing = T),]
+    useTri <- buildTable(input,subTri,cluster)
+    for (i in 1:length(useTri$freq)) {
+        count = useTri[i,2]
+        if (count <=5 ) {
+          gt = TRUE
+          useTri[i,2] <- GTCount[count+1,5]
+        }
+      }
+    }
+  
+  options(digits = 4)
+  # predict words data frame
+  predictword <- data.frame(Word=useTri$w4, probability=(useTri$freq/nCount)*100, stringsAsFactors = FALSE)
+  
+  # plot the result
+  plot<-predictword[order(predictword$probability),] # default, low to high
+  dotchart(plot$probability, labels = plot$Word, pch=19, color="blue", xlab= paste("Probability (in %) of top", cluster, "clusters"), main = paste("N-Grams Starting with: \"",toupper(input),"\""))
+  print(paste("Words completing N-Gram starting with: ", toupper(input)))
+  if (Katz == TRUE) {
+    print("Katz back off helped find options by reducing 3-gram to a 2-gram/1-gram")
+  }
+  if (gt == TRUE) {
+    print("Good-Turing techniques were used in the solution")
+  }
+  return(predictword)
+}
+```
+```{r predict_from_text_string_model}
+getLastWords <- function(inputTxt, n, seperator = " ") {
+  txt <- strsplit(inputTxt, seperator)[[1]]
+  l <- length(txt)
+  if (l<n) {
+    stop("Text length invalid!")
+  } else {
+    index <- l-n+1
+    txt <- txt[index:l]
+  }
+  lastwords <- paste(txt, collapse = " ")
+}
+
+getNextWords <- function(inputdata) {
+  suggestwords <- c()
+  suggestwords <- predict(inputdata)$Word
+  suggestwords <- subset(suggestwords, !(suggestwords %in% c("<EOS>","<NUM>", "NA")))
+  suggestwords <- unique(suggestwords)
+  suggestwords[1:3]
+}
+# q2
+# Using the FULL Corpus (minus single occurrences) and just 4-Grams and 3-Grams
+```
+Tasks to accomplish
+
+Build a predictive model based on the previous data modeling steps - you may combine the models in any way you think is appropriate.
+Evaluate the model for efficiency and accuracy - use timing software to evaluate the computational complexity of your model. Evaluate the model accuracy using different metrics like perplexity, accuracy at the first word, second word, and third word.
+Questions to consider
+
+How does the model perform for different choices of the parameters and size of the model?
+How much does the model slow down for the performance you gain?
+Does perplexity correlate with the other measures of accuracy?
+Can you reduce the size of the model (number of parameters) without reducing performance?
+
+### Creative exploration
+### Creating a data product
+### Creating a short slide deck pitching your product
