@@ -1,0 +1,983 @@
+
+```{r setup}
+
+rm(list=ls());gc()
+library(parallel)
+library(foreach)
+library(doParallel)
+library("quanteda")
+library("devtools")
+library("readtext")
+library("data.table")
+library(tm)
+library(stringr)
+
+startParallelProcessing <- function() {
+  noofCores <- detectCores() - 1
+  cluster <- makeCluster(noofCores)
+  registerDoParallel(cluster)
+  cluster
+}
+
+stopParallelProcessing <- function(cluster) {
+  stopCluster(cluster)
+  stopImplicitCluster()
+}
+
+abs_path <- "C:/Users/yinjiang/Syncplicity Folders/personal/Script/JH_track/Capstone Project/pipeclean/"
+relative_path <- "data/sample_50_trim4/"
+full_path <- paste(abs_path, relative_path, sep="")
+trim <- 5
+set.seed(12345)
+
+```
+
+```{r sample_data}
+
+if (!file.exists(paste(full_path, "sample.rds", sep = ""))) {
+  # sample function from raw data
+  percentage = .5
+  load(paste(abs_path, "data/en_US.raw.RData", sep=""))
+  
+  sampledata <- function(data, percentage) {
+    index <- sample(1:length(data), length(data)*percentage)
+    sample_data <- data[index]
+    sample_data
+  }
+
+  # sample the data
+  sample_blogs <- sampledata(blogs,percentage)
+  sample_twitter <- sampledata(twitter,percentage)
+  sample_news <- sampledata(news, percentage)
+  sample_total <- c(sample_blogs, sample_twitter, sample_news)
+  
+  save(sample_blogs, sample_twitter, sample_news, sample_total, file= paste(full_path, "sample.RData", sep=""), compress=TRUE, ascii=FALSE)
+  saveRDS(sample_total, paste(full_path, "sample.rds", sep = ""), ascii=FALSE, compress=TRUE)
+  rm(sample_blogs, sample_twitter, sample_news, sample_total,blogs,twitter,news)
+  gc()
+}
+
+```
+
+```{r summary_data}
+if (!file.exists(paste(full_path, "sample.rds", sep = ""))) {
+  # Summarise the basic data info
+  Summarisedata <- function(data) {
+    size <- object.size(data)/1024/1024
+    length <- length(data)
+    words <- sum(stri_count_words(data))
+    data.frame(
+      fileSize = round(as.integer(size), digit=2),
+      lineCount = length,
+      wordCount = words
+    )
+  }
+  load(paste(abs_path, "data/en_US.raw.RData",sep=""))
+  load(paste(full_path, "sample.RData", sep = ""))
+  
+  # Explore the basic data info
+  newsinfo <- Summarisedata(news)
+  blogsinfo <- Summarisedata(blogs)
+  twitterinfo <- Summarisedata(twitter)
+  samplenewsinfo <- Summarisedata(sample_news)
+  sampleblogsinfo <- Summarisedata(sample_blogs)
+  sampletwitterinfo <- Summarisedata(sample_twitter)
+  sampletotalinfo <- Summarisedata(sample_total)
+  Summarydata <- data.frame(
+    fileName = c("News","Blogs","Twitter","Sample News", "Sample Blogs", "Sample Twitter", "Sample Total"),
+    rbind(newsinfo, blogsinfo, twitterinfo, samplenewsinfo, sampleblogsinfo, sampletwitterinfo, sampletotalinfo))
+  colnames(Summarydata) <- c("File Name", "File Size in Megabyte", "Line Count", "Word Count")
+  # save temporary files inside data folder
+  save (Summarydata, file= "./data/sample_25_trim/Summary.RData", compress=TRUE, ascii=FALSE)
+  #write.csv(sample_total, "./data/sample_total.csv")
+  write.csv(Summarydata, "./data/sample_25_trim/Summarydata.csv")
+  rm(sample_news, sample_total, sample_twitter,sample_blogs, Summarydata)
+  rm(news,blogs,twitter)
+  rm(blogsinfo,newsinfo,sampleblogsinfo,sampletotalinfo,sampletwitterinfo,samplenewsinfo)
+  gc()
+}
+```
+
+```{r preprocessing_tokens}
+
+if (!file.exists(paste(full_path, "tokens.rds", sep = ""))) {
+  # Encoding(sample_total) <- "latin1"
+  # iconv(sample_total, "latin1", "ASCII", sub="")
+  profanity <- readLines(paste(abs_path, "data/profanity.txt", sep=""), encoding = "UTF-8", skipNul = TRUE)
+  chars <- c("\u0092","\u0093","\u0094", "\u0095","\u0096","\u0097")
+  
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  removePattern <- function(x, pattern, replace= "") {
+    gsub(pattern, replace, x)
+  }
+  
+  sample_total <- readRDS(paste(full_path, "sample.rds", sep=""))
+  sample_total <- iconv(sample_total, "latin1", "ASCII", sub="")
+  sentence <- tolower(sample_total) %>% 
+      removePunctuation %>% 
+      removeNumbers %>% 
+      stripWhitespace %>%
+      str_trim
+  
+  test1 <- removePattern(sentence, "\\d+")
+  test1 <- removePattern(test1, "_+")
+  test1 <- removePattern(test1, ":", " ")
+  test1 <- removePattern(test1, "\\.", " ")
+  test1 <- removePattern(test1, "\\s([b-hj-z])\\1{0,}\\b"," ")
+  test1 <- removePattern(test1, "([[:alpha:]])\\1{2,}", "\\1")
+  sample_total <- removePattern(test1, "\\s([a-z])\\1{1,2}('(s|ve|d|re))?"," ")
+  #test1 <- removePattern(test1, "([a-z])\1{3,}")
+  #(?i)(?<=^|[^a-z])cat(?=$|[^a-z])
+  
+  saveRDS(sample_total, paste(full_path, "sample.rds", sep=""), ascii=FALSE, compress=TRUE)
+  
+  sample_total <- readRDS(paste(full_path, "sample.rds", sep=""))
+  Corpus <- corpus(sample_total)
+  rm(sample_total); gc()
+  tokens <- tokens(Corpus, remove_symbols=TRUE, remove_numbers=TRUE, remove_punct=TRUE, remove_twitter=TRUE, remove_url=TRUE, remove_separators=TRUE, remove_hyphens=TRUE)
+  # how to remove words start with digits
+  tokens <- tokens_remove(tokens, c(profanity, chars))
+  saveRDS(tokens, paste(full_path, "tokens.rds", sep=""), ascii=FALSE, compress=TRUE)
+  rm(Corpus, sample_total, tokens); gc()
+
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+}
+
+```
+
+```{r ngram_models_trim}
+
+if (!file.exists(paste(full_path, "gram1.","trim",trim,".rds", sep = ""))) {
+  
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  tokens <- readRDS(paste(full_path, "tokens.rds", sep=""))
+
+  getNgramTrim <- function(full_path, x, trim) {
+    gram <- tokens_ngrams(tokens, n=x)
+    v <- dfm(gram)
+    v <- dfm_trim(v, min_termfreq = trim)
+    rm(gram); gc()
+    gramdt1 <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+    rm(v); gc()
+    freqfreq1 <- data.frame(table(gramdt1$freq)[1:7],length=length(gramdt1$freq))
+    saveRDS(freqfreq1, paste(full_path,"freqfreq", x,".trim", trim, ".rds",sep=""), ascii=FALSE, compress=TRUE)
+    rm(freqfreq1); gc()
+    if (x!=1) {
+      gramdt1[,w:=as.character(strsplit(word, "_[^_]+$"))][]
+      gramdt1[,pred:=sub(".*_(.*)$","\\1", word)][]
+    }
+    saveRDS(gramdt1, paste(full_path,"gram", x, ".trim", trim, ".rds",sep=""), ascii=FALSE, compress=TRUE)
+    rm(gramdt1); gc()
+  }
+  
+  getNgramTrim(full_path = full_path, x=1, trim = trim)
+  getNgramTrim(full_path = full_path, x=2, trim = trim)
+  getNgramTrim(full_path = full_path, x=3, trim = trim)
+  getNgramTrim(full_path = full_path, x=4, trim = trim)
+  getNgramTrim(full_path = full_path, x=5, trim = trim)
+  
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+
+}
+
+```
+
+```{r stupid_back_off_score_prune}
+cluster <- startParallelProcessing()
+print(paste("START TIME:", Sys.time()))
+
+getScore <- function(full_path, x, trim) {
+  g <- readRDS(paste(full_path, "gram", 1, ".trim", trim, ".rds", sep=""))
+  g <- g[, .(score=freq/sum(freq), w=word, pred=word),]
+  setorder(g, -score)
+  saveRDS(g, paste(full_path, "gram1.", "trim", trim, ".score.rds", sep=""), ascii=FALSE, compress=TRUE)
+  saveRDS(g[1:5], paste(full_path, "gram1.", "trim", trim, ".scoretop5.rds", sep=""), ascii=FALSE, compress=TRUE)
+  rm(g); gc()
+  for (i in x:2) {
+    beta = 0.4^(x-i)
+    g <- readRDS(paste(full_path, "gram", i, ".trim", trim, ".rds", sep=""))
+    g <- g[, .(word,freq,score=beta*freq/sum(freq), pred), by=w]
+    setorderv(g, c("w", "score"), c(1,-1))
+    saveRDS(g, paste(full_path, "gram", i, ".trim", trim, ".score.rds", sep=""), ascii=FALSE, compress=TRUE)
+    g5 <- g[g[, .I[1:min(5, length(freq))], by=w]$V1]
+    saveRDS(g5[,.(score, pred), by=w], paste(full_path, "gram", i, ".trim", trim, ".scoretop5.rds", sep=""), ascii=FALSE, compress=TRUE)
+    rm(g, g5); gc()
+  }
+}
+
+getScore(full_path, 5, trim)
+
+Prediction <- function(inputTxt) {
+  suggestwords <- c()
+  abs_path <- getwd()
+  #"gram5","gram4",
+  ngrammodelnames <- c("gram3","gram2","gram1")
+  l1 <- length(ngrammodelnames)
+  for (i in 1:l1) {
+    n <- 3-i
+    gram5 <- readRDS(paste(abs_path,"/data/sample/scoretop5.",ngrammodelnames[i],".rds",sep=""))
+    if (i==1) j<-5
+    if (n==0) {
+      suggestword <- gram5$word
+      rm(gram5); gc()
+      suggestwords <- c(suggestwords, suggestword)
+    } else {
+      lastNwords <- getlastNwords(inputTxt, n)
+      print(lastNwords)
+      suggestword <- gram5[w==lastNwords]
+      rm(gram5); gc()
+      if (nrow(suggestword)) {
+        l <- length(suggestword$pred)
+        if (l >= j) {
+          suggestwords <- c(suggestwords, suggestword$pred[1:j])
+          print(suggestwords)
+          break
+          } else {
+            suggestwords <- c(suggestwords, suggestword$pred[1:l])
+            j <- j-l
+          }
+        }
+    }
+  }
+  suggestwords
+}
+
+stopParallelProcessing(cluster)
+print(paste("END TIME:", Sys.time()))
+```
+
+```{r good_turing_smoothing}
+# Solution 1:
+# use PGT for low values of r, say for r < 6
+# For n-grams with higher rates, use PMLE which is reliable for higher values of r, that is PMLE(w1.wn)=C(w1.wn)/N
+
+# build empty matrix
+
+if (!file.exists(paste(full_path, "Good_Turing_5.trim",trim,".rds", sep=""))) {
+  
+  GTCount<-matrix(c(seq(0,6,1),rep(0,35)),nrow=7,ncol=6, dimnames = list(c(seq(0,6,1)), c("count","uni","bi","tri","four","five")))
+  
+  # fill in the matrix with info
+  freqfreq1 <- readRDS(paste(full_path, "freqfreq1.trim",trim,".rds", sep=""))
+  unigramL <- freqfreq1$length[1]
+  freqfreq2 <- readRDS(paste(full_path, "freqfreq2.trim",trim,".rds", sep=""))
+  bigramL <- freqfreq2$length[1]
+  freqfreq3 <- readRDS(paste(full_path, "freqfreq3.trim",trim,".rds", sep=""))
+  trigramL <- freqfreq3$length[1]
+  freqfreq4 <- readRDS(paste(full_path, "freqfreq4.trim",trim,".rds", sep=""))
+  fourgramL <- freqfreq4$length[1]
+  freqfreq5 <- readRDS(paste(full_path, "freqfreq5.trim",trim,".rds", sep=""))
+  fivegramL <- freqfreq5$length[1]
+  
+  GTCount[1,2] <- freqfreq1[1,2] # use freq 1's counts as freq 0's counts for unigram
+  GTCount[2:7,2] <- freqfreq1[1:6,2]
+  GTCount[1,3] <- unigramL^2 - bigramL # all the unseen bi's = all combination from uni's - seen bi's
+  GTCount[2:7,3] <- freqfreq2[1:6,2]
+  GTCount[1,4] <- unigramL^3 - trigramL # all the unseen tri's = all combination from uni's - seen tri's
+  GTCount[2:7,4] <- freqfreq3[1:6,2]
+  GTCount[1,5] <- unigramL^4 - fourgramL # all the unseen four's = all combination from uni's - seen four's
+  GTCount[2:7,5] <- freqfreq4[1:6,2]
+  GTCount[1,6] <- unigramL^5 - fivegramL # all the unseen five's = all combination from uni's - seen five's
+  GTCount[2:7,6] <- freqfreq5[1:6,2]
+  
+  GTCount[is.na(GTCount)]<-0
+  remove(freqfreq1,freqfreq2,freqfreq3,freqfreq4,freqfreq5); gc()
+  
+  # Smoothing lower counts
+  # not discount ratio but new counts = d * r
+  makeGTCount_ex1 <- function(Count){
+    # choose r = 5 to avoid higher count = 0 case
+    kFactor <- (5+1)*Count[7]/Count[2] # KFactor used to re-normalize and make sure the total is the same
+    for (c in 0:5){
+    num <- (c+1)*Count[c+2]/Count[c+1]-c*kFactor
+    Count[c+1] <- as.numeric(num/(1-kFactor))
+    }
+    Count
+  }
+  
+  # Smoothing lower counts
+  # d = (r+1)*Nr+1 /(r*Nr)
+  # generate discount ratio instead of new counts
+  makeGTCount_ex2 <- function(Count){
+    # choose r = 5 to avoid higher count = 0 case
+    for (c in 1:5){
+      Count[c+1] <- (c+1)*Count[c+2]/(c*Count[c+1])
+    }
+    Count
+  }
+  
+  GTCount[,2] <- makeGTCount_ex2(GTCount[,2])
+  GTCount[,3] <- makeGTCount_ex2(GTCount[,3])
+  GTCount[,4] <- makeGTCount_ex2(GTCount[,4])
+  GTCount[,5] <- makeGTCount_ex2(GTCount[,5])
+  GTCount[,6] <- makeGTCount_ex2(GTCount[,6]) 
+  
+  saveRDS(GTCount, paste(full_path, "Good_Turing_5.trim",trim,".rds", sep=""), ascii=FALSE, compress=TRUE)
+
+}
+```
+
+```{r Katz_back_off_with_GT_prob_prune}
+
+if (!file.exists(paste(full_path, "gram1.trim",trim,".prob.rds", sep=""))) {
+  
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  GTCount <- readRDS(paste(full_path, "Good_Turing_5.trim", trim, ".rds", sep = ""))
+  
+  getProb <- function(full_path, x) {
+    g <- readRDS(paste(full_path, "gram",x, ".trim", trim, ".rds", sep = ""))
+    if (x==1) {
+      g <- g[, .(w=word, pred=word,freq)]
+    }
+    g$discount = rep(1, nrow(g))
+    g[freq<=5, discount:= GTCount[freq+1,x+1]]
+    g[, prob:= freq*discount/sum(freq), by=w]
+    g[, leftover_prob:= 1-sum(prob), by=w]
+    setorderv(g, c("w", "prob"), c(1,-1))
+    saveRDS(g, paste(full_path, "gram",x, ".trim", trim, ".prob.rds", sep = ""), ascii=FALSE, compress=TRUE)
+    g <- g[g[, .I[1:min(5, length(prob))], by=w]$V1]
+    g5 <- g[, .(freq,pred,discount,prob,leftover_prob), by=w]
+    setorderv(g5, c("w", "freq"), c(1,-1))
+    saveRDS(g5, paste(full_path, "gram",x, ".trim", trim, ".probtop5.rds", sep = ""), ascii=FALSE, compress=TRUE)
+    g5 <- g5[, .(leftprob=1-sum(prob)), by=w]
+    saveRDS(g5, paste(full_path, "gram",x, ".trim", trim, ".alpha.rds", sep = ""), ascii=FALSE, compress=TRUE)
+    rm(g, g5); gc()
+  }
+  
+  getProb(full_path = full_path, x=1)
+  getProb(full_path = full_path, x=2)
+  getProb(full_path = full_path, x=3)
+  getProb(full_path = full_path, x=4)
+  getProb(full_path = full_path, x=5)
+  
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+
+}
+# approach with setting keys
+#setkey(dt, A,x)
+#dt[J(unique(A)), mult="first"]
+# without setting keys
+#dt[dt[, .I[1:min(5,length(x))], by=A, nomatch=0]$V1]
+#for (j in w) set(gramdt5, j = j, value = as.character(gramdt5[[j]]))
+#gramdt5[, w := lapply(.SD, as.character), .SDcols = 'w']setkey(gramdt5,"w")
+
+```
+```{r sql_db}
+library(RSQLite)
+
+if (!file.exists(paste(full_path,  "train_stupid_back_off.db", sep = ""))) {
+mydrv <- dbDriver("SQLite");
+db <- dbConnect(drv=mydrv, dbname=paste(full_path, "train_stupid_back_off.db", sep = ""))
+
+dbSendQuery(conn=db,
+            "CREATE TABLE NGRAM
+            (pre TEXT,
+            word TEXT,
+            n INTEGER)")
+
+for (n in 1:5) {
+  g5 <- readRDS(paste(full_path, "gram", n, ".trim5.scoretop5.rds",sep=""))
+  sql <- paste("INSERT INTO NGRAM VALUES ($w, $pred, ", n, ")", sep = "")
+  dbBegin(db)
+  dbSendPreparedQuery(db, sql, bind.data = data.frame(g5))
+  dbCommit(db)
+}
+
+dbDisconnect(db)
+
+# mydrv <- dbDriver("SQLite");
+# db <- dbConnect(drv=mydrv, dbname=paste(full_path, "train_katz_back_off.db", sep = ""))
+# 
+# dbSendQuery(conn=db,
+#             "CREATE TABLE NGRAM
+#             (pre TEXT,
+#             word TEXT,
+#             freq INTEGER,
+#             d REAL,
+#             n INTEGER)")
+# 
+# for (n in 1:5) {
+#   g5 <- readRDS(paste(full_path, "gram", n, ".probtop5.rds",sep=""))
+#   sql <- paste("INSERT INTO NGRAM VALUES ($w, $pred, $freq, $discount, ", n, ")", sep = "")
+#   dbBegin(db)
+#   dbSendPreparedQuery(db, sql, bind.data = data.frame(g5))
+#   dbCommit(db)
+# }
+# 
+# dbDisconnect(db)
+
+}
+
+```
+
+```{r evaluation_of_models}
+require(digest)
+require(stringi)
+require(data.table)
+require(tm)
+require(stringr)
+require(RSQLite)
+
+removePattern <- function(x, pattern, replace= "") {
+  gsub(pattern, replace, x)
+}
+
+abs_path <- "C:/Users/yinjiang/Syncplicity Folders/personal/Script/JH_track/Capstone Project/pipeclean/"
+relative_path <- "benchmark/dsci-benchmark-master/"
+full_path <- paste(abs_path, relative_path, sep="")
+
+tweets <- readLines(paste(full_path, 'data/tweets.txt',sep=""), encoding = 'UTF-8')
+
+# verify checksum of loaded lines
+digest(paste0(tweets, collapse = '||'), 
+       algo='sha256', 
+       serialize=F)==
+  "7fa3bf921c393fe7009bc60971b2bb8396414e7602bb4f409bed78c7192c30f4"
+sentence <- iconv(tweets, "latin1", "ASCII", sub="")
+sentence <- tolower(sentence)
+sentence <- removePattern(sentence, "http(s)?:.*\\b")
+sentence <- removePattern(sentence, "[[:punct:]]", " ")
+sentence <- removeNumbers(sentence)
+sentence <- stripWhitespace(sentence)
+tweets <- str_trim(sentence) # remove whitespace from start and end of string.
+
+tweets <- tweets[1:5]
+
+# make sure we can read it back in
+blogs <- readLines(paste(full_path, 'data/blogs.txt',sep=""), encoding = 'UTF-8')
+
+# verify checksum of loaded lines
+digest(paste0(blogs, collapse = '||'), 
+       algo='sha256', 
+       serialize=F)==
+  "14b3c593e543eb8b2932cf00b646ed653e336897a03c82098b725e6e1f9b7aa2"
+sentence <- iconv(blogs, "latin1", "ASCII", sub="")
+sentence <- tolower(sentence)
+sentence <- removePattern(sentence, "http(s)?:.*\\b")
+sentence <- removePattern(sentence, "\\.\\.\\.")
+sentence <- removePattern(sentence, "[[:punct:]]", " ")
+sentence <- removeNumbers(sentence)
+sentence <- stripWhitespace(sentence)
+blogs <- str_trim(sentence)
+
+blogs <- blogs[1:5]
+
+split.sentence <- compiler::cmpfun(function(line) {
+    require(stringi)
+    # append a space to the sentence (to make sure we always create one result with only the 
+    # last word missing)
+    sent <- paste0(line, ' ')
+
+    sep <- stri_locate_all_regex(line, 
+                                 pattern = '[^\\w\'@#\u2018\u2019\u201b]+', 
+                                 omit_empty=T, 
+                                 case_insensitive=T)[[1]]
+    sapply(seq_len(nrow(sep)), 
+           function(i) {
+               c(sentence=ifelse(i>1, substr(line, 1, sep[i-1,2]), ''), 
+                    nextWord=tolower(substr(line, max(sep[i-1,2]+1, 1), min(nchar(line), sep[i,1]-1)))
+               )
+               })
+}, options=list(optimize=3))
+
+benchmark <- compiler::cmpfun(function(FUN, ..., sent.list, ext.output=T) {
+  require(stringi)
+  require(digest)
+  require(data.table)
+  
+  result <- rbindlist(lapply(names(sent.list), 
+                             function(list.name) {  
+                               sentences <- sent.list[[list.name]]
+                               score <- 0
+                               max.score <-0
+                               hit.count.top3 <- 0
+                               hit.count.top1 <- 0
+                               total.count <- 0
+                               time <- system.time({
+                                 for (sent in sentences) {
+                                   split <- split.sentence(sent[1])
+                                   max.score <- max.score + ncol(split)*3
+                                   total.count <- total.count + ncol(split)
+                                   rank <- sapply(seq_len(ncol(split)),
+                                                  function(i) {
+                                                    min(which(FUN(split[1,i], ...)==split[2,i]),4)
+                                                  })
+                                   score <- score + sum(4-rank)
+                                   hit.count.top3 <- hit.count.top3 + sum(rank<4)
+                                   hit.count.top1 <- hit.count.top1 + sum(rank==1)
+                                 }
+                               })
+                               
+                               list('list.name' = list.name,
+                                    'line.count' = length(sentences),
+                                    'word.count' = sum(stri_count_words(sentences)),
+                                    'hash' = digest(paste0(sentences, collapse = '||'), algo='sha256', serialize=F),
+                                    'score' = score,
+                                    'max.score' = max.score,
+                                    'hit.count.top3' = hit.count.top3,
+                                    'hit.count.top1' = hit.count.top1,
+                                    'total.count' = total.count,
+                                    'total.runtime' = time[3]
+                               )               
+                             }), use.names=T) #result
+  
+  setkey(result, list.name)
+  
+  # The overall scores are calculated weighting each data set equally (independent of the 
+  # number of lines in each dataset).
+  overall.score.percent = 100 * result[,sum(score/max.score)/.N]
+  overall.precision.top3 = 100 * result[,sum(hit.count.top3/total.count)/.N]
+  overall.precision.top1 = 100 * result[,sum(hit.count.top1/total.count)/.N]
+  average.runtime = 1000 * result[,sum(total.runtime)/sum(total.count)]
+  number.of.predictions = result[,sum(total.count)]
+  total.mem.used = sum(unlist(lapply(ls(.GlobalEnv),
+                                     function(x) {
+                                       object.size(get(x,
+                                                       envir = .GlobalEnv,
+                                                       inherits = FALSE))
+                                     })))/(1024^2)
+  cat(sprintf(paste0('Overall top-3 score:     %.2f %%\n',
+                     'Overall top-1 precision: %.2f %%\n',
+                     'Overall top-3 precision: %.2f %%\n',
+                     'Average runtime:         %.2f msec\n',
+                     'Number of predictions:   %d\n',
+                     'Total memory used:       %.2f MB\n'),
+              overall.score.percent,
+              overall.precision.top1,
+              overall.precision.top3,
+              average.runtime,
+              number.of.predictions,
+              total.mem.used
+  ))
+  
+  cat('\nDataset details\n')
+  for (p.list.name in result$list.name) {
+    res <- result[list(p.list.name)]
+    cat(sprintf(paste0(' Dataset "%s" (%d lines, %d words, hash %s)\n',
+                       '  Score: %.2f %%, Top-1 precision: %.2f %%, Top-3 precision: %.2f %%\n'
+    ),
+    p.list.name,
+    res$line.count,
+    res$word.count,
+    res$hash,
+    100 * res$score/res$max.score,
+    100 * res$hit.count.top1/res$total.count,
+    100 * res$hit.count.top3/res$total.count
+    ))
+  }
+  
+  if (ext.output==T) {
+    packages <- sort(stri_replace_first_fixed(search()[stri_detect_regex(search(), 
+                                                                         '^package:')], 
+                                              'package:', ''))
+    
+    cat(sprintf(paste0('\n\n%s, platform %s\n', 
+                       'Attached non-base packages:   %s\n',
+                       'Unattached non-base packages: %s'
+    ),
+    sessionInfo()$R.version$version.string,
+    sessionInfo()$platform,
+    paste0(sapply(sessionInfo()$otherPkgs, 
+                  function(pkg) {
+                    paste0(pkg$Package, ' (v', pkg$Version, ')')
+                  }), 
+           collapse = ', '),
+    paste0(sapply(sessionInfo()$loadedOnly, 
+                  function(pkg) { 
+                    paste0(pkg$Package, ' (v', pkg$Version, ')')
+                  }), 
+           collapse = ', ')
+    ))
+  }
+}, options=list(optimize =3))
+
+ngram_stupid_backoff_dt <- function(raw, m=3, full_path) {
+  
+  if (raw=="") {
+    return (c("the","on","a"))
+  }
+  
+  sentence <- strsplit(raw, split= " ")
+  sentence <- unlist(sentence) # change type from list to character
+  matched <- c()
+  if (length(sentence)==1) {
+    prefix=sentence
+    g2 <- readRDS(paste(full_path,"gram2.scoretop5.rds", sep=""))
+    setkey(g2,w)
+    predicted <- g2[w==prefix]$pred
+    matched <- c(matched, predicted)
+    if (length(matched)>=3) {
+      return(matched[1:3])
+    } else {
+      matched <- c(matched, c("the","on","a"))
+      matched <- unique(matched)
+      return(matched[1:3])
+      }
+    } else {
+      g3 <- readRDS(paste(full_path,"gram3.scoretop5.rds", sep=""))
+      setkey(g3,w)
+      prefix <- paste(tail(sentence, 2), collapse = "_")
+      predicted <- g3[w==prefix]$pred
+      matched <- c(matched, predicted)
+      matched <- unique(matched)
+      if (length(matched)>=3) {
+        return(matched[1:3])
+      } else {
+        prefix <- paste(tail(sentence, 1), collapse = "_")
+        predicted <- g2[w==prefix]$pred
+        matched <- c(matched, predicted)
+        matched <- unique(matched)
+        if (length(matched)>=3) {
+          return(matched[1:3])
+        } else {
+          matched <- c(matched, c("the","on","a"))
+          matched <- unique(matched)
+          return(matched[1:3])
+        }
+      }
+    }
+}
+
+ngram_stupid_backoff_sql_while <- function(raw, m=3, full_path) {
+  
+  if (raw=="") {
+    return (c("the","on","a"))
+  }
+  
+  db <- dbConnect(SQLite(), dbname=paste(full_path,"train_stupid_back_off.db", sep=""))
+  sentence <- strsplit(raw, split= " ")
+  sentence <- unlist(sentence) # change type from list to character
+  matched <- c()
+  
+  max = min(length(sentence), m-1)
+  while (max >= 1) {
+    gram <- paste(tail(sentence, max), collapse = "_")
+    sql <- paste("SELECT word FROM NGRAM WHERE",
+                 " pre=='", paste(gram), "'",
+                 " AND n==", max+1, " LIMIT 3", sep="")
+    res <- dbSendQuery(conn=db, sql)
+    predicted <- dbFetch(res, n=-1)
+    dbClearResult(res)
+    matched <- c(matched, predicted$word)
+    if (length(unique(matched)>=3)) {
+      return(matched)
+    } else {max = max-1}
+  }
+  dbDisconnect(db)
+  matched <- c(matched, c("the","on","a"))
+  matched <- unique(matched)
+  return(matched[1:3])
+}
+
+ngram_stupid_backoff_sql <- function(raw, m=3, full_path) {
+  
+  if (raw=="") {
+    return (c("the","on","a"))
+  }
+  
+  db <- dbConnect(SQLite(), dbname=paste(full_path,"train_stupid_back_off.db", sep=""))
+  max = m-1
+  sentence <- strsplit(raw, split= " ")
+  sentence <- unlist(sentence) # change type from list to character
+  matched <- c()
+  
+  for (i in min(length(sentence), max):1) {
+    gram <- paste(tail(sentence,i), collapse = "_")
+    sql <- paste("SELECT word FROM NGRAM WHERE",
+                 " pre=='", paste(gram), "'",
+                 " AND n==", i+1, " LIMIT 3", sep="")
+    res <- dbSendQuery(conn=db, sql)
+    predicted <- dbFetch(res, n=-1)
+    dbClearResult(res)
+    matched <- c(matched, predicted$word)
+    matched <- unique(matched)
+    l <- length(matched)
+    if(l>=3) {
+      return(matched)
+    }
+  }
+  dbDisconnect(db)
+  matched <- c(matched, c("the","on","a"))
+  matched <- unique(matched)
+  return(matched[1:3])
+}
+
+abs_path <- "C:/Users/yinjiang/Syncplicity Folders/personal/Script/JH_track/Capstone Project/pipeclean/"
+relative_path <- "data/sample_trim/"
+full_path <- paste(abs_path, relative_path, sep="")
+
+print("3-gram model, freq >1, sql, 15% sampling")
+print(paste("START TIME:", Sys.time()))
+
+benchmark(ngram_stupid_backoff_sql, m=3, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+
+print(paste("END TIME:", Sys.time()))
+
+print("4-gram model, freq >1, sql, 15% sampling")
+print(paste("START TIME:", Sys.time()))
+
+benchmark(ngram_stupid_backoff_sql, m=4, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+
+print(paste("END TIME:", Sys.time()))
+
+print("5-gram model, freq >1, sql, 15% sampling")
+print(paste("START TIME:", Sys.time()))
+
+benchmark(ngram_stupid_backoff_sql, m=5, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+
+print(paste("END TIME:", Sys.time()))
+
+relative_path <- "data/sample_trim4/"
+full_path <- paste(abs_path, relative_path, sep="")
+
+print("3-gram model, freq > 4, sql, 15% sampling")
+print(paste("START TIME:", Sys.time()))
+
+benchmark(ngram_stupid_backoff_sql, m=3, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+
+print(paste("END TIME:", Sys.time()))
+
+print("4-gram model, freq > 4, sql, 15% sampling")
+print(paste("START TIME:", Sys.time()))
+
+benchmark(ngram_stupid_backoff_sql, m=4, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+
+print(paste("END TIME:", Sys.time()))
+
+print("5-gram model, freq > 4, sql, 15% sampling")
+print(paste("START TIME:", Sys.time()))
+
+benchmark(ngram_stupid_backoff_sql, m=5, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+
+print(paste("END TIME:", Sys.time()))
+
+relative_path <- "data/sample_25_trim/"
+full_path <- paste(abs_path, relative_path, sep="")
+
+print("3-gram model, freq >1, sql, 25% sampling")
+print(paste("START TIME:", Sys.time()))
+benchmark(ngram_stupid_backoff_sql, m=3, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+print(paste("END TIME:", Sys.time()))
+
+print("4-gram model, freq >1, sql, 25% sampling")
+print(paste("START TIME:", Sys.time()))
+benchmark(ngram_stupid_backoff_sql, m=4, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+print(paste("END TIME:", Sys.time()))
+
+print("5-gram model, freq >1, sql, 25% sampling")
+print(paste("START TIME:", Sys.time()))
+benchmark(ngram_stupid_backoff_sql, m=5, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+print(paste("END TIME:", Sys.time()))
+
+relative_path <- "data/sample_25_trim4/"
+full_path <- paste(abs_path, relative_path, sep="")
+
+print("3-gram model, freq > 4, sql, 25% sampling")
+print(paste("START TIME:", Sys.time()))
+benchmark(ngram_stupid_backoff_sql, m=3, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+print(paste("END TIME:", Sys.time()))
+
+print("4-gram model, freq > 4, sql, 25% sampling")
+print(paste("START TIME:", Sys.time()))
+benchmark(ngram_stupid_backoff_sql, m=4, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+print(paste("END TIME:", Sys.time()))
+
+print("5-gram model, freq > 4, sql, 25% sampling")
+print(paste("START TIME:", Sys.time()))
+benchmark(ngram_stupid_backoff_sql, m=5, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+print(paste("END TIME:", Sys.time()))
+
+relative_path <- "data/sample_50_trim4/"
+full_path <- paste(abs_path, relative_path, sep="")
+
+print("3-gram model, freq > 4, sql, 50% sampling")
+print(paste("START TIME:", Sys.time()))
+benchmark(ngram_stupid_backoff_sql, m=3, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+print(paste("END TIME:", Sys.time()))
+
+print("4-gram model, freq > 4, sql, 50% sampling")
+print(paste("START TIME:", Sys.time()))
+benchmark(ngram_stupid_backoff_sql, m=4, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+print(paste("END TIME:", Sys.time()))
+
+print("5-gram model, freq > 4, sql, 50% sampling")
+print(paste("START TIME:", Sys.time()))
+benchmark(ngram_stupid_backoff_sql, m=5, full_path=full_path,
+          sent.list = list('tweets' = tweets,
+                           'blogs' = blogs),
+          ext.output = T)
+print(paste("END TIME:", Sys.time()))
+
+```
+
+```{r stupid_back_off_lamda_0p4}
+
+inputTxt <- c("The guy in front of me just bought a pound of bacon, a bouquet, and a case of","You're the reason why I smile everyday. Can you follow me please? It would mean the","Hey sunshine, can you follow me and make me the","Very early observations on the Bills game: Offense still struggling but the","Go on a romantic date at the","Well I'm pretty sure my granny has some old bagpipes in her garage I'll dust them off and be on my","Ohhhhh #PointBreak is on tomorrow. Love that film and haven't seen it in quite some","After the ice bucket challenge Louis will push his long wet hair out of his eyes with his little","Be grateful for the good times and keep the faith during the","If this isn't the cutest thing you've ever seen, then you must be")
+
+words <- list(c("soda","pretzels","beer","cheese"), c("world","universe","best","most"), c("bluest","saddest","happiest","smelliest"),c("players","defense","crowd","referees"), c("beach","movies","mail","grocery"), c("motorcycle","way","horse","phone"), c("years","time","weeks","thing"),c("ears","eyes","fingers","toes"),c("worse","sad","bad","hard"),
+c("insane","callous","insensitive","asleep"))
+
+q2 <- function(inputTxt, words) {
+  for (i in 1:length(inputTxt)) {
+    word <- words[i]
+    answer <- paste("Q",i,": ", paste(GetProb(inputTxt[i], words[[i]]),collapse = ","), sep = "")
+    print(answer)
+  }
+} 
+
+getlastNwords <- function(txt, n, seperator = " ") {
+  ele <- strsplit(txt, seperator)[[1]]
+  l <- length(ele)
+  if (l < n) stop("Text length smaller than n!")
+  else {
+    index <- l-n+1
+    ele <- ele[index:l]
+  }
+  lastNwords <- paste(ele, collapse = "_")
+  lastNwords <- tolower(lastNwords)
+  lastNwords
+}
+
+GetProb <- function(input, words) {
+  matched=list()
+  l1 <- length(words)
+  abs_path <- getwd()
+  ngrammodelnames <- c("gram5","gram4","gram3","gram2","gram1")
+  l2 <- length(ngrammodelnames)
+  for (m in 1:l1) {
+    print(m)
+    for (i in 1:l2) {
+      print(i)
+      n <- l2-i
+      lastwords <- getlastNwords(input,n)
+      testword <- paste(lastwords, words[m],sep = "_")
+      g5 <- readRDS(paste(abs_path,"/data/sample/scoretop5.",ngrammodelnames[i],".rds",sep=""))
+      if (n==0) {
+        matched[m]=g5[word==words[m]]$score
+      } else {
+        match = g5[word==testword]
+      }
+      if (nrow(match)>0) {
+        matched[m]=match$score
+        break
+      }
+    }
+  }
+  matched
+}
+```
+
+```{r katz_back_off_with_GT}
+
+inputTxt <- c("When you breathe, I want to be the air for you. I'll be there for you live and","Guy at my table's wife got up to go to the bathroom and I asked about dessert and he started telling me about his","I'd give anything to see arctic monkeys this","Talking to your mom has the same effect as a hug and helps reduce your","When you were in Holland you were like 1 inch away from me but you hadn't time to take a","I'd just like all of these questions answered, a presentation of evidence, and a jury to settle the","I can't deal with unsymetrical things. I can't even hold an uneven number of bags of groceries in each","Every inch of you is perfect from the bottom to the","I'm thankful my childhood was filled with imagination and bruises from playing","I like how the same people are in almost all of Adam Sandler's")
+
+q3 <- function(inputTxt) {
+  for (i in 1:length(inputTxt)) {
+    answer <- paste("Q",i,": ", paste(Suggestions(inputTxt[i]),collapse = ","), sep = "")
+    print(answer)
+  }
+} 
+
+getlastNwords <- function(txt, n, seperator = " ") {
+  ele <- strsplit(txt, seperator)[[1]]
+  l <- length(ele)
+  if (l < n) stop("Text length smaller than n!")
+  else {
+    index <- l-n+1
+    ele <- ele[index:l]
+  }
+  lastNwords <- paste(ele, collapse = "_")
+  lastNwords <- tolower(lastNwords)
+  lastNwords
+}
+
+Suggestions <- function(inputTxt , l) {
+  suggestwords <- c()
+  abs_path <- getwd()
+  for (i in l:2) {
+    n <- i-1
+    g5 <- readRDS(paste(abs_path,"/data/sample/probtop5.gram",i,".rds",sep=""))
+    if (i==l) {
+      j <- 5 # top 5 suggestions
+      lastNwords <- getlastNwords(inputTxt, n) #a's_are
+      suggestword <- g5[w==lastNwords]
+      l2 <- nrow(suggestword)
+      # found top 5 and break the for loops
+      if (l2 >= j) {
+        suggestwords <- c(suggestwords, suggestword$pred[1:j])
+        return(suggestwords) 
+      } 
+      # calculate # of suggestions left
+      j <- j-l2
+      # save info for (n-1) gram model probability calculation and normalization
+      beta_leftover_p <- suggestword$leftprob[1]
+      ngram_pred <- suggestword$pred
+    } else {
+      # continue to search for (n-1) gram models
+      lastNwords <- getlastNwords(inputTxt, n) # are
+      suggestword <- g5[w==lastNwords]
+      remain <- suggestword[!(pred %in% ngram_pred)]
+      alpha = beta_leftover_p /sum(remain$freq * remain$discount)/ sum(suggestword$freq)
+      suggestword <- suggestword[,.(freq,pred,word,leftprob, prob= alpha*(freq*discount)/sum(freq)),by=w]
+      setorder(suggestword, -prob)
+      l2 <- nrow(suggestword)
+      if (l2 >= j) {
+        suggestwords <- c(suggestwords, suggestword$pred[1:j])
+        return(suggestwords) 
+      } 
+    }
+  }
+}
+```
+
