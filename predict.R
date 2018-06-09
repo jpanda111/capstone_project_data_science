@@ -7,16 +7,10 @@ removePattern <- function(x, pattern, replace= "") {
   gsub(pattern, replace, x)
 }
 
-ngram_stupid_backoff <- function(raw, m=3, db) {
+ngram_stupid_backoff <- function(raw, m, db) {
   max = m-1
-  abs_path <- "C:/Users/yinjiang/Syncplicity Folders/personal/Script/JH_track/Capstone Project/pipeclean/"
-  
-  if (raw == "") { 
-    g <- readRDS(paste(abs_path,"/data/sample/scoretop5.gram1.rds", sep=""))
-    return (g[1:3]$pred)
-    }
   #repeat pre-processing same as train data here
-  sentence <- iconv(raw, "latin1", "ASCII", sub="")
+  sentence <- iconv(sentence, "latin1", "ASCII", sub="")
   test1 <- removePattern(sentence, "\\d+")
   test1 <- removePattern(test1, "_+")
   test1 <- removePattern(test1, ":", " ")
@@ -25,7 +19,7 @@ ngram_stupid_backoff <- function(raw, m=3, db) {
   test1 <- removePattern(test1, "([[:alpha:]])\\1{2,}", "\\1")
   sentence <- removePattern(test1, "\\s([a-z])\\1{1,2}('(s|ve|d|re))?"," ")
   
-  sentence <- tolower(sentence) %>% 
+  sentence <- tolower(raw) %>% 
     removePunctuation %>% 
     removeNumbers %>% 
     stripWhitespace %>%
@@ -40,25 +34,24 @@ ngram_stupid_backoff <- function(raw, m=3, db) {
     sql <- paste("SELECT word, score FROM NGRAM WHERE",
                  " pre=='", paste(gram), "'",
                  " AND n==", i+1, " LIMIT 5", sep="")
-    print(sql)
     res <- dbSendQuery(conn=db, sql)
     predicted <- dbFetch(res, n=-1)
     names(predicted) <- c("Next_Possible_Word", "Score (Adjusted Freq)")
     matched <- rbind(matched, predicted)
     matched <- matched[!duplicated(matched$Next_Possible_Word),]
     l <- nrow(matched)
-    if(l>=3) {
-      return(matched[1:3,])
+    if(l>=5) {
+      return(matched[1:5,])
     }
   }
   return("Sorry! Cannot Find it!")
 }
 
-ngram_katz_back_off <- function(raw, m=3, db) {
+ngram_katz_back_off <- function(raw, m, db) {
   # tri-gram models only
   max = m-1
   #repeat pre-processing same as train data here
-  sentence <- iconv(raw, "latin1", "ASCII", sub="")
+  sentence <- iconv(sentence, "latin1", "ASCII", sub="")
   test1 <- removePattern(sentence, "\\d+")
   test1 <- removePattern(test1, "_+")
   test1 <- removePattern(test1, ":", " ")
@@ -67,7 +60,7 @@ ngram_katz_back_off <- function(raw, m=3, db) {
   test1 <- removePattern(test1, "([[:alpha:]])\\1{2,}", "\\1")
   sentence <- removePattern(test1, "\\s([a-z])\\1{1,2}('(s|ve|d|re))?"," ")
   
-  sentence <- tolower(sentence) %>% 
+  sentence <- tolower(raw) %>% 
     removePunctuation %>% 
     removeNumbers %>% 
     stripWhitespace %>%
@@ -76,8 +69,7 @@ ngram_katz_back_off <- function(raw, m=3, db) {
     unlist # change type from list to character
   
   matched <- data.frame()
-  abs_path <- "C:/Users/yinjiang/Syncplicity Folders/personal/Script/JH_track/Capstone Project/pipeclean/"
-  leftover_prob <- readRDS(paste('/data/sample/leftover_prob.gram',max+1,".rds",sep=""))
+  leftover_prob <- readRDS(paste('../data/sample/leftover_prob.gram',max+1,".rds",sep=""))
 
   for (i in min(length(sentence), max):1) {
     gram <- paste(tail(sentence,i), collapse = "_")
@@ -102,8 +94,8 @@ ngram_katz_back_off <- function(raw, m=3, db) {
     setorder(matched, -Prob_with_Good_Turing_Smoothing)
     matched <- matched[!duplicated(matched$Next_Possible_Word),]
     l <- nrow(matched)
-    if(l>=3) {
-      return(matched[1:3,])
+    if(l>=5) {
+      return(matched[1:5,])
     }
   }
   return("Sorry! Cannot Find it!")

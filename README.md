@@ -1,11 +1,22 @@
-# capstone_project_data_science
+Next word prediction benchmark
+==============================
 
-###### download raw data
-###### clean and seperate into Train, HoldOut and test data set
-###### Use quanteda package to tokenize and generate n-gram models
-###### Good Turing smoothing method
-###### Kneser_Ney smoothing method
-###### interpolation prediction model vs Stupid backoff models
-###### lambda optimization in Holdout dataset
-###### perplexity calculation in test dataset
-###### build up final data product
+A simple R script for benchmarking a next word prediction algorithm.
+
+Usage:
+------
+
+0. Download the repository
+0. Extract data.zip into the current folder (password is provided in the Coursera forum)
+0. Open benchmark.R and run the code up to section 03
+0. (optional) create a wrapper function for your prediction function (section 03)
+0. Perform the benchmark (section 04)
+0. Report your results in the [Coursera Forum](https://class.coursera.org/dsscapstone-004/forum/thread?thread_id=218)
+
+File description:
+-----------------
+
+* **data.zip** Archive containing the benchmark datasets.
+* **benchmark.R** Script needed to perform the benchmark (see above).
+* **generate_dataset.R** Script used to generate the benchmark datasets (this should not be re-run and is provided for reference only)
+
