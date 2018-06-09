@@ -1,0 +1,47 @@
+---
+title: "My Fancy Presentation"
+author: "jpanda111"
+date: "April 19, 2018"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## My new slide
+
+Plain text
+
+*italicized text*
+
+**Bold text**
+
+## MY title
+### A top level subheading
+#### A second level subheading
+
+`for (i %in% 1:10)`
+
+## Slide with Bullets
+
+- Bullet 1
+- Bullet 2
+- Bullet 3
+
+1. Item a
+2. Item b
+
+## Slide with R Output
+
+```{r, comment="",echo=TRUE, eval=FALSE}
+head(mtcars)
+```
+
+## Slide with Plot
+
+```{r, fig.align="center", fig.cap="My figure"}
+plot(mtcars$wt, mtcars$mpg, xlab="weight",ylab="MPG")
+```
+
+https://seankross.github.io/slides/Developing_Data_Products/R_Markdown/R_Markdown.html
