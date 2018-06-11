@@ -1,0 +1,50 @@
+Coursera Data Science Capstone Project
+========================================================
+author: jpanda111
+date: June 09, 2018
+autosize: true
+
+* This Pitch is an application that uses Natural Language Processing techniques for next words predictions. It takes a user's input phrase and suggests **TOP 3** next word predictions
+* The data came from [HC Corpora](http://www.corpora.heliohost.org) including three different network sources(Blogs, News and Twitter)
+* Here are some reference links:
+    + [Presentation](https://jpanda111.shinyapps.io/presentation)
+    + [Shiny Application](https://jpanda111.shinyapps.io/capstone-shiny-app/)
+    + [Milestone Report](https://jpanda111.shinyapps.io/milestone_report)
+    + [Source Code](https://jpanda111.shinyapps.io/capstone_project)
+    
+Procedures
+========================================================
+
+* The data was cleaned, pre-processed (remove the punctuation, URLs, whitespace, numbers and profanity words), and tokenized
+* The n-grams data table (unigram, bigram, trigram) are created and sorted by the frequency of words
+* Shiny App Speed and Accuracy Tradeoff: 
+
+    + Only Top 3 predictions with same prefix and high frequency words (freq>4)are kept in n-grams data table
+    + SQL data base was created to do prediction search.
+    + Increase sampling size up to 50% and extend ngram table to quadgram to further increase accuracy.
+
+Prediction Algorithms
+========================================================
+
+> Stupid Back Off
+* Trigram is first used (prefix == last two words of the user provided sentence) and return **Top 3** suggestions. 
+* If not found or total less than 3, it will back off to (n-1) gram model (bigram)
+* If not found or total less than 3, it will back off to Unigram and return the most common words with highest frequency instead.
+* It uses score instead of probability and lambda is set to 0.4.
+
+> Katz Back Off algorithm with Good-Turing Smoothing
+- It estimates the conditional probability of a word given its history in the n-gram. 
+- Therefore provided better results with most reliable information about a given history
+- To deal with unseen words or zero probability, good turing smoothing technique is applied but only for lower freqency (< 6).  
+- For higher frequency, use PMLE which is reliable enough. 
+
+Model Comparison Benchmark
+========================================================
+
+Estimate prediction models efficiency (speed, memory used, accuray) with testbench from [benchmark](https://github.com/hfoffani/dsci-benchmark).
+![Model comparison Results](results.jpg)
+
+The App USER INTERFACE
+========================================================
+
+![Application Screenshot](shiny-app.jpg)
