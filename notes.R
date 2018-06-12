@@ -180,3 +180,164 @@ quanteda_options(threads= 7)
 # Probably it's a good idea to give more options to end-users, rather than just the most relevant predicted word. Additionally, also the second-most? The third-most?
 # In the n-gram table, e.g: 3-gram, we may have: A-B-X (100 times), A-B-Y (80 times), A-B-Z (70 times), A-B-L (10 times), A-B-M (5 times)... The A-B-L, A-B-M should be removed to save memory... (ShinyApps's max memory is 1 GB, free account).
 # The difference is that instead of multiplying your lambda by the discounted probability on the unigram you will use the P Continuation (one which uses context to decrease probability of words which appear only after novel (low variety) contexts, like Francisco, which has a high Unigram Count, but only appears after San or General
+# http://mkoerner.de/media/bachelor-thesis.pdf
+
+# read input RDS, convert ngrams to a data table so we can aggregate counts
+message(paste("Start: convert ngrams to data table",Sys.time()))
+theTable <- data.table(ngram=(unname(unlist(readRDS(theFileName)))),count=1)
+message(paste("End: convert ngrams to data table",Sys.time()))
+
+
+# runtime: 10.47 seconds x-360 
+message(paste("Start: aggregate data table by ngram",Sys.time()))
+aggNgram <- theTable[,.(count = sum(count)),keyby=ngram]
+message(paste("End: aggregate data table by ngram",Sys.time()))
+
+# stupid back off algorithm of 5-gram models
+# if (candidateIs5gram) {
+#   score = matched5gramCount / input4gramCount
+# } else if (candidateIs4gram) {
+#   score = 0.4 * matched4gramCount / input3gramCount
+# } else if (candidateIs3gram) {
+#   score = 0.4 * 0.4 * matched3gramCount / input2gramCount
+# } else if (candidateIs2gram) {
+#   score = 0.4 * 0.4 * 0.4 * matched2gramCount / input1gramCount
+# } else {
+#   score = 0.4 * 0.4 * 0.4 * 0.4 * matched1gramCount / total1gramCount
+# }
+# examples of stupid back off algorithm
+library(stringr)
+library(dplyr)
+fivegram  <- data.frame(word = c('Your house looks very great', 'Your house looks very bad', 'Your house looks very ugly', 'Your house looks very beautiful', 'I dont like your house'), freq = c(15,10,4,16,24))
+fourgram  <- data.frame(word = c('house looks very great', 'house looks very bad', 'house looks very ugly', ' house looks very beautiful'), freq = c(4,9,4,15))
+input1 <- 'I love to be here, Your house looks very'
+input2 <- 'I love to be here, house looks very'
+
+# taking input1 
+lastWords <- paste(tail(strsplit(input1,split=" ")[[1]],4), collapse = ' ')
+# Checking in fivegram 
+result <- fivegram %>% filter(str_detect(word, lastWords))
+finalProb <- result %>% mutate(prob = freq/sum(freq))
+# the most probable word 
+line <- as.character(head(finalProb[order(finalProb$prob),],1)$word)
+nextword <- tail(strsplit(line,split=" ")[[1]],1)
+# what if unigram is not present in the corpus
+# A typical solution: Just set a threshold K (i.e. K=5) and pre-process your training corpus. Then replace all words occurring 
+# less that K-times in the corpus with a generic term UNK. During test phase, replace the unknown word with the UNK.
+
+# generate pre and cur words within data table
+dt[, c("pre", "cur"):=list(unlist(strsplit(word, "[ ]+?[a-z]+$")), unlist(strsplit(word, "^([a-z]+[ ])+"))[2]), by=word]
+# find matched pattern with pre=right and display it
+de_max <- max(tFreq_2[pre=="right"]$freq)
+tFreq_2[pre == "right" & freq == de_max]
+# another example
+# Predict, using N-Grams and Stupid Backoff
+library(magrittr)
+library(stringr)
+library(RSQLite)
+library(tm)
+
+ngram_backoff <- function(raw, db) {
+  # From Brants et al 2007.
+  # Find if n-gram has been seen, if not, multiply by alpha and back off
+  # to lower gram model. Alpha unnecessary here, independent backoffs.
+  
+  max = 3  # max n-gram - 1
+  
+  # process sentence, don't remove stopwords
+  sentence <- tolower(raw) %>%
+    removePunctuation %>%
+    removeNumbers %>%
+    stripWhitespace %>%
+    str_trim %>%
+    strsplit(split=" ") %>%
+    unlist
+  
+  for (i in min(length(sentence), max):1) {
+    gram <- paste(tail(sentence, i), collapse=" ")
+    sql <- paste("SELECT word, freq FROM NGram WHERE ", 
+                 " pre=='", paste(gram), "'",
+                 " AND n==", i + 1, " LIMIT 5", sep="")
+    res <- dbSendQuery(conn=db, sql)
+    predicted <- dbFetch(res, n=-1)
+    names(predicted) <- c("Next Possible Word", "Score (Adjusted Freq)")
+    print(predicted)
+    
+    if (nrow(predicted) > 0) return(predicted)
+  }
+  
+  return("Sorry! You've stumped me, I don't know what would come next.")
+}
+
+# if else within data table
+df[, if (all(is.na(date))) date[1L] else max(date, na.rm=TRUE), by=id]
+
+# instructions on quanteda package and text analysis including TTR
+# https://docs.quanteda.io/articles/pkgdown/replication/digital-humanities.html
+
+
+# Sometimes another way to evaluate models is by intrinsic evaluation called perplexity, but it is a poor/bad approximation if the test and training data don't share a lot of similarity. The assertion is that perplexity is ok if two data sets are very similar and that can be OK for pilot experiments. Both are valuable methods.
+# perplexity is the probabilty of the test set, normlized by the number of words. "PP(W) = P(W1, W2... Wn) ^ (1/n)"
+# When chain ruled:
+# PP(W) = N root ( product N over all I, 1 / P(Wi|W1...Wi-1) )
+# When chain ruled (bigram only):
+# PP(W) = N root ( product N over all I, 1 / P(Wi|Wi-1) )
+# "minimizing perplexity is the same as maximizing probability"
+# - The stupid backoff algorithm is no probabilistic model and the perplexity cannot be calculated. Instead you may calculate the word-error rate (WER). 
+# - Another requirement is that your probabilistic model must be able to calculate the probabilities with unseen words, i.e. p(hellllllloooo | i am insane) must not be zero 
+# although you never observed ''hellllllloooo'' in the training set. 
+# - The third requirement of perplexity is that you calculate this on a testing set, not in the training set.
+
+
+
+# Bigrams with zero probability will result in division by zero when calculating perplexity, so they must be counteracted.
+
+# Backoff:
+# Use a trigram if you have good evidence/data
+# What if you haven't seen a trigram, you look at the bigrams, or if they don't exist for that combination, then you can look look at the unigram.
+
+# Interpolation:
+# mixing unigram, bigram, trigram.
+# Interpolation tends to work better than backoff
+
+# Linear Interpolation (Simple interpolation):
+
+# Adding 1gram+2gram+3gram together depending on weights (λ)
+# P_hat(Wn|Wn-1Wn-2) =
+# λ1 * P(trigram) + λ2 * P(bigram) + λ3 * P(unigram)
+# Where do the lambdas come from? How to set lambdas? We use a held-out corpus. Choose λ to maximize the probability of held-out data:
+# 
+# Fix the N-gram probabilities (on the training data)
+# Then search for λs that give the largest probability to held-out set.
+
+# If we know all the words in advanced then Vocabulary V is fixed and we are talking about a Closed vocabulary task (menus, predefined scenarios). Often we don't know this (if a vocabulary is fixed or not) in advance. This translates into Out of Vocabulary (OOV) words, and turns the exercise into an Open vocabulary Task.
+# Instead: utilize an unknown word token < UNK > and train on < UNK > probabilities.
+# 
+# Create a fixed lexicon L of size V
+# At text normalization phase, any training word not in L (all OOV words..or rare words) changed to < UNK >
+# Now we train its probabilities like any normal word.
+# At decoding time, if text input (doesn't match) use UNK probabilities for any such word not in the training data.
+
+# thinking to compare
+# stupid back off
+# sampling 15% and 3-grams and freq > 1
+# sampling 25% and 3-grams and freq > 1
+# sampling 15% and 4-grams and freq > 1
+# sampling 15% and 3-grams and freq > 4
+
+# Katz back off 
+# sampling 15% and 3-grams and freq > 1
+# sampling 25% and 3-grams and freq > 1
+# sampling 15% and 4-grams and freq > 1
+# sampling 15% and 3-grams and freq > 4
+
+# The SBO does not consider or account for unobserved n-grams, but instead backs off to the nearest matched n-gram until it reaches the unigram. 
+# The KBO model incorporates a form of smoothing in order to estimate probabilities of unobserved n-grams which appears to be more accurate when using a 
+# limited number of n-grams (trigrams in this case).
+
+# Study this further with rpubs material and lectures
+# https://rpubs.com/mszczepaniak/predictkbo1preproc
+# https://rpubs.com/mszczepaniak/predictkbo2ngeda
+# https://rpubs.com/mszczepaniak/predictkbo3model
+# https://rpubs.com/mszczepaniak/predictkbo4cv
+

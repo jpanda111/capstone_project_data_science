@@ -25,7 +25,7 @@ stopParallelProcessing <- function(cluster) {
 }
 
 abs_path <- "C:/Users/yinjiang/Syncplicity Folders/personal/Script/JH_track/Capstone Project/pipeclean/"
-relative_path <- "data/sample_50_trim4/"
+relative_path <- "data/sample_25_trim4/"
 full_path <- paste(abs_path, relative_path, sep="")
 trim <- 5
 set.seed(12345)
@@ -211,7 +211,7 @@ getScore <- function(full_path, x, trim) {
   }
 }
 
-getScore(full_path, 5, trim)
+getScore(full_path, 4, trim)
 
 Prediction <- function(inputTxt) {
   suggestwords <- c()
@@ -252,6 +252,45 @@ stopParallelProcessing(cluster)
 print(paste("END TIME:", Sys.time()))
 ```
 
+```{r ngram_models_notrim}
+trim=1
+if (!file.exists(paste(full_path, "gram1.","trim",trim,".rds", sep = ""))) {
+  
+  cluster <- startParallelProcessing()
+  print(paste("START TIME:", Sys.time()))
+  
+  tokens <- readRDS(paste(full_path, "tokens.rds", sep=""))
+
+  getNgramTrim <- function(full_path, x, trim) {
+    gram <- tokens_ngrams(tokens, n=x)
+    v <- dfm(gram)
+    v <- dfm_trim(v, min_termfreq = trim)
+    rm(gram); gc()
+    gramdt1 <- data.table(word = featnames(v), freq = colSums(v), stringsAsFactors = FALSE)
+    rm(v); gc()
+    freqfreq1 <- data.frame(table(gramdt1$freq)[1:7],length=length(gramdt1$freq))
+    saveRDS(freqfreq1, paste(full_path,"freqfreq", x,".trim", trim, ".rds",sep=""), ascii=FALSE, compress=TRUE)
+    rm(freqfreq1); gc()
+    if (x!=1) {
+      gramdt1[,pred:=sub(".*_(.*)$","\\1", word)][]
+      gramdt1[,w:=as.character(strsplit(word, "_[^_]+$"))][]
+    }
+    saveRDS(gramdt1, paste(full_path,"gram", x, ".trim", trim, ".rds",sep=""), ascii=FALSE, compress=TRUE)
+    rm(gramdt1); gc()
+  }
+  
+  getNgramTrim(full_path = full_path, x=1, trim = trim)
+  getNgramTrim(full_path = full_path, x=2, trim = trim)
+  getNgramTrim(full_path = full_path, x=3, trim = trim)
+  
+  
+  stopParallelProcessing(cluster)
+  print(paste("END TIME:", Sys.time()))
+
+}
+
+```
+
 ```{r good_turing_smoothing}
 # Solution 1:
 # use PGT for low values of r, say for r < 6
@@ -270,10 +309,10 @@ if (!file.exists(paste(full_path, "Good_Turing_5.trim",trim,".rds", sep=""))) {
   bigramL <- freqfreq2$length[1]
   freqfreq3 <- readRDS(paste(full_path, "freqfreq3.trim",trim,".rds", sep=""))
   trigramL <- freqfreq3$length[1]
-  freqfreq4 <- readRDS(paste(full_path, "freqfreq4.trim",trim,".rds", sep=""))
-  fourgramL <- freqfreq4$length[1]
-  freqfreq5 <- readRDS(paste(full_path, "freqfreq5.trim",trim,".rds", sep=""))
-  fivegramL <- freqfreq5$length[1]
+  #freqfreq4 <- readRDS(paste(full_path, "freqfreq4.trim",trim,".rds", sep=""))
+  #fourgramL <- freqfreq4$length[1]
+  #freqfreq5 <- readRDS(paste(full_path, "freqfreq5.trim",trim,".rds", sep=""))
+  #fivegramL <- freqfreq5$length[1]
   
   GTCount[1,2] <- freqfreq1[1,2] # use freq 1's counts as freq 0's counts for unigram
   GTCount[2:7,2] <- freqfreq1[1:6,2]
@@ -281,13 +320,13 @@ if (!file.exists(paste(full_path, "Good_Turing_5.trim",trim,".rds", sep=""))) {
   GTCount[2:7,3] <- freqfreq2[1:6,2]
   GTCount[1,4] <- unigramL^3 - trigramL # all the unseen tri's = all combination from uni's - seen tri's
   GTCount[2:7,4] <- freqfreq3[1:6,2]
-  GTCount[1,5] <- unigramL^4 - fourgramL # all the unseen four's = all combination from uni's - seen four's
-  GTCount[2:7,5] <- freqfreq4[1:6,2]
-  GTCount[1,6] <- unigramL^5 - fivegramL # all the unseen five's = all combination from uni's - seen five's
-  GTCount[2:7,6] <- freqfreq5[1:6,2]
+  #GTCount[1,5] <- unigramL^4 - fourgramL # all the unseen four's = all combination from uni's - seen four's
+  #GTCount[2:7,5] <- freqfreq4[1:6,2]
+  #GTCount[1,6] <- unigramL^5 - fivegramL # all the unseen five's = all combination from uni's - seen five's
+  #GTCount[2:7,6] <- freqfreq5[1:6,2]
   
   GTCount[is.na(GTCount)]<-0
-  remove(freqfreq1,freqfreq2,freqfreq3,freqfreq4,freqfreq5); gc()
+  remove(freqfreq1,freqfreq2,freqfreq3); gc()
   
   # Smoothing lower counts
   # not discount ratio but new counts = d * r
@@ -315,8 +354,8 @@ if (!file.exists(paste(full_path, "Good_Turing_5.trim",trim,".rds", sep=""))) {
   GTCount[,2] <- makeGTCount_ex2(GTCount[,2])
   GTCount[,3] <- makeGTCount_ex2(GTCount[,3])
   GTCount[,4] <- makeGTCount_ex2(GTCount[,4])
-  GTCount[,5] <- makeGTCount_ex2(GTCount[,5])
-  GTCount[,6] <- makeGTCount_ex2(GTCount[,6]) 
+  #GTCount[,5] <- makeGTCount_ex2(GTCount[,5])
+  #GTCount[,6] <- makeGTCount_ex2(GTCount[,6]) 
   
   saveRDS(GTCount, paste(full_path, "Good_Turing_5.trim",trim,".rds", sep=""), ascii=FALSE, compress=TRUE)
 
@@ -324,39 +363,54 @@ if (!file.exists(paste(full_path, "Good_Turing_5.trim",trim,".rds", sep=""))) {
 ```
 
 ```{r Katz_back_off_with_GT_prob_prune}
-
-if (!file.exists(paste(full_path, "gram1.trim",trim,".prob.rds", sep=""))) {
+# KBO cannot trim freq > 4 since needs to calculate prob and leftovers
+if (!file.exists(paste(full_path, "gram.trim",trim,".prob.rds", sep=""))) {
   
   cluster <- startParallelProcessing()
   print(paste("START TIME:", Sys.time()))
   
   GTCount <- readRDS(paste(full_path, "Good_Turing_5.trim", trim, ".rds", sep = ""))
   
-  getProb <- function(full_path, x) {
-    g <- readRDS(paste(full_path, "gram",x, ".trim", trim, ".rds", sep = ""))
-    if (x==1) {
-      g <- g[, .(w=word, pred=word,freq)]
-    }
+  getProb_trigram <- function(full_path) {
+    g <- readRDS(paste(full_path, "gram3", ".trim", trim, ".rds", sep = ""))
     g$discount = rep(1, nrow(g))
-    g[freq<=5, discount:= GTCount[freq+1,x+1]]
+    g[freq<=5, discount:= GTCount[freq+1,4]]
     g[, prob:= freq*discount/sum(freq), by=w]
     g[, leftover_prob:= 1-sum(prob), by=w]
+    setkey(g,"w")
     setorderv(g, c("w", "prob"), c(1,-1))
-    saveRDS(g, paste(full_path, "gram",x, ".trim", trim, ".prob.rds", sep = ""), ascii=FALSE, compress=TRUE)
-    g <- g[g[, .I[1:min(5, length(prob))], by=w]$V1]
-    g5 <- g[, .(freq,pred,discount,prob,leftover_prob), by=w]
-    setorderv(g5, c("w", "freq"), c(1,-1))
-    saveRDS(g5, paste(full_path, "gram",x, ".trim", trim, ".probtop5.rds", sep = ""), ascii=FALSE, compress=TRUE)
-    g5 <- g5[, .(leftprob=1-sum(prob)), by=w]
-    saveRDS(g5, paste(full_path, "gram",x, ".trim", trim, ".alpha.rds", sep = ""), ascii=FALSE, compress=TRUE)
-    rm(g, g5); gc()
+    saveRDS(g, paste(full_path, "gram3", ".trim", trim, ".prob.rds", sep = ""), ascii=FALSE, compress=TRUE)
+    g5 <- g[, .(pred,prob,leftover_prob), by=w]
+    saveRDS(g5, paste(full_path, "gram3", ".trim", trim, ".probtop5.rds", sep = ""), ascii=FALSE, compress=TRUE)
+    rm(g,g5); gc()
   }
   
-  getProb(full_path = full_path, x=1)
-  getProb(full_path = full_path, x=2)
-  getProb(full_path = full_path, x=3)
-  getProb(full_path = full_path, x=4)
-  getProb(full_path = full_path, x=5)
+  getProb_bigram <- function(full_path) {
+    g <- readRDS(paste(full_path, "gram2", ".trim", trim, ".rds", sep = ""))
+    g$discount = rep(1, nrow(g))
+    g[freq<=5, discount:= GTCount[freq+1,3]]
+    g[, prob:= freq*discount/sum(freq), by=w]
+    g[, leftover_prob:= 1-sum(prob), by=w]
+    setkey(g,"w")
+    setorderv(g, c("w", "prob"), c(1,-1))
+    saveRDS(g, paste(full_path, "gram2", ".trim", trim, ".prob.rds", sep = ""), ascii=FALSE, compress=TRUE)
+    rm(g,g5); gc()
+  }
+  
+  getProb_unigram <- function(full_path) {
+    g <- readRDS(paste(full_path, "gram1", ".trim", trim, ".rds", sep = ""))
+    g$discount = rep(1, nrow(g))
+    g[freq<=5, discount:= GTCount[freq+1,2]]
+    g[, prob:= freq*discount/sum(freq), by=word]
+    setkey(g,"word")
+    setorderv(g, c("word", "prob"), c(1,-1))
+    saveRDS(g, paste(full_path, "gram1", ".trim", trim, ".prob.rds", sep = ""), ascii=FALSE, compress=TRUE)
+    rm(g,g5); gc()
+  }
+  
+  getProb_trigram(full_path)
+  getProb_bigram(full_path)
+  getProb_unigram(full_path)
   
   stopParallelProcessing(cluster)
   print(paste("END TIME:", Sys.time()))
@@ -371,22 +425,24 @@ if (!file.exists(paste(full_path, "gram1.trim",trim,".prob.rds", sep=""))) {
 #gramdt5[, w := lapply(.SD, as.character), .SDcols = 'w']setkey(gramdt5,"w")
 
 ```
+
 ```{r sql_db}
 library(RSQLite)
 
-if (!file.exists(paste(full_path,  "train_stupid_back_off.db", sep = ""))) {
+if (!file.exists(paste(full_path,  "shiny-app/train_stupid_back_off.db", sep = ""))) {
 mydrv <- dbDriver("SQLite");
-db <- dbConnect(drv=mydrv, dbname=paste(full_path, "train_stupid_back_off.db", sep = ""))
+db <- dbConnect(drv=mydrv, dbname=paste(full_path, "shiny-app/train_stupid_back_off.db", sep = ""))
 
 dbSendQuery(conn=db,
             "CREATE TABLE NGRAM
             (pre TEXT,
             word TEXT,
+            score REAL,
             n INTEGER)")
 
-for (n in 1:5) {
+for (n in 1:4) {
   g5 <- readRDS(paste(full_path, "gram", n, ".trim5.scoretop5.rds",sep=""))
-  sql <- paste("INSERT INTO NGRAM VALUES ($w, $pred, ", n, ")", sep = "")
+  sql <- paste("INSERT INTO NGRAM VALUES ($w, $pred, $score, ", n, ")", sep = "")
   dbBegin(db)
   dbSendPreparedQuery(db, sql, bind.data = data.frame(g5))
   dbCommit(db)
@@ -394,26 +450,62 @@ for (n in 1:5) {
 
 dbDisconnect(db)
 
-# mydrv <- dbDriver("SQLite");
-# db <- dbConnect(drv=mydrv, dbname=paste(full_path, "train_katz_back_off.db", sep = ""))
-# 
-# dbSendQuery(conn=db,
-#             "CREATE TABLE NGRAM
-#             (pre TEXT,
-#             word TEXT,
-#             freq INTEGER,
-#             d REAL,
-#             n INTEGER)")
-# 
-# for (n in 1:5) {
-#   g5 <- readRDS(paste(full_path, "gram", n, ".probtop5.rds",sep=""))
-#   sql <- paste("INSERT INTO NGRAM VALUES ($w, $pred, $freq, $discount, ", n, ")", sep = "")
-#   dbBegin(db)
-#   dbSendPreparedQuery(db, sql, bind.data = data.frame(g5))
-#   dbCommit(db)
-# }
-# 
-# dbDisconnect(db)
+}
+
+if (!file.exists(paste(full_path,  "train_katz_back_off_trigram.db", sep = ""))) {
+mydrv <- dbDriver("SQLite");
+db <- dbConnect(drv=mydrv, dbname=paste(full_path, "train_katz_back_off_trigram.db", sep = ""))
+
+dbSendQuery(conn=db,
+            "CREATE TABLE NGRAM
+            (pre TEXT,
+            word TEXT,
+            prob REAL,
+            leftover REAL
+            )")
+
+g5 <- readRDS(paste(full_path, "gram3.trim1.probtop5.rds",sep=""))
+sql <- paste("INSERT INTO NGRAM VALUES ($w, $pred, $prob, $leftover_prob)", sep = "")
+dbBegin(db)
+dbSendPreparedQuery(db, sql, bind.data = data.frame(g5))
+dbCommit(db)
+dbDisconnect(db)
+
+db <- dbConnect(drv=mydrv, dbname=paste(full_path, "train_katz_back_off_bigram.db", sep = ""))
+
+dbSendQuery(conn=db,
+            "CREATE TABLE NGRAM
+            (pre TEXT,
+            word TEXT,
+            prob REAL,
+            leftover REAL,
+            freq INTEGER,
+            d REAL
+            )")
+
+g5 <- readRDS(paste(full_path, "gram2.trim1.prob.rds",sep=""))
+sql <- paste("INSERT INTO NGRAM VALUES ($w, $pred, $prob, $leftover_prob, $freq, $discount)", sep = "")
+dbBegin(db)
+dbSendPreparedQuery(db, sql, bind.data = data.frame(g5))
+dbCommit(db)
+dbDisconnect(db)
+
+db <- dbConnect(drv=mydrv, dbname=paste(full_path, "train_katz_back_off_unigram.db", sep = ""))
+
+dbSendQuery(conn=db,
+            "CREATE TABLE NGRAM
+            (word TEXT,
+            prob REAL,
+            freq INTEGER,
+            d REAL
+            )")
+
+g5 <- readRDS(paste(full_path, "gram1.trim1.prob.rds",sep=""))
+sql <- paste("INSERT INTO NGRAM VALUES ($word, $prob, $freq, $discount)", sep = "")
+dbBegin(db)
+dbSendPreparedQuery(db, sql, bind.data = data.frame(g5))
+dbCommit(db)
+dbDisconnect(db)
 
 }
 
