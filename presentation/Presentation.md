@@ -44,18 +44,18 @@ Model Comparison Benchmark
 - Since only use prediction error rate for model accuracy, this comparison mainly for Stupid Backoff. For evaluation of Katz Backoff model's perplexity will leave for future work.
 - From the comparison table, we can find 3-gram language modeling with 25% sampling size using sql data base will give the best accuracy and speed.
 
-```{r, echo=FALSE}
-ngram <- c(3,4,5,3,3,3,4,3,4)
-sampling <- c(0.15,0.15,0.15,0.25,0.25,0.25,0.25,0.5,0.5)
-trim <- c('>4', '>4', '>4', '>1', '>4', '>4', '>4', '>4', '>4')
-speed <- c(59,100,163,2781,470, 84, 156, 138, 271)
-accuracy3 <- c(21.91,22.2, 21.12, 22.07, 22.07, 22.07,22.48,22.54,23.06)
-memory <- c(3.37,3.37,3.37,2.4,17.71,3.37,3.37,3.37,3.37)
-notes <- c("SBO sql","SBO sql","SBO sql","KBO sql", "SBO data table", "SBO sql","SBO sql","SBO sql","SBO sql")
-my_df <- data.frame(ngram,sampling,trim,speed, accuracy3,memory,notes)
-colnames(my_df)<-c('ngram','sampling size', 'freq', 'speed(msec)', 'TOP 3 Accuracy (%)', 'memory(MB)', 'notes')
-knitr::kable(my_df)
-```
+
+| ngram| sampling size|freq | speed(msec)| TOP 3 Accuracy (%)| memory(MB)|notes          |
+|-----:|-------------:|:----|-----------:|------------------:|----------:|:--------------|
+|     3|          0.15|>4   |          59|              21.91|       3.37|SBO sql        |
+|     4|          0.15|>4   |         100|              22.20|       3.37|SBO sql        |
+|     5|          0.15|>4   |         163|              21.12|       3.37|SBO sql        |
+|     3|          0.25|>1   |        2781|              22.07|       2.40|KBO sql        |
+|     3|          0.25|>4   |         470|              22.07|      17.71|SBO data table |
+|     3|          0.25|>4   |          84|              22.07|       3.37|SBO sql        |
+|     4|          0.25|>4   |         156|              22.48|       3.37|SBO sql        |
+|     3|          0.50|>4   |         138|              22.54|       3.37|SBO sql        |
+|     4|          0.50|>4   |         271|              23.06|       3.37|SBO sql        |
 
 The App USER INTERFACE
 ========================================================
