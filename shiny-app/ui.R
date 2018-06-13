@@ -11,7 +11,7 @@ shinyUI(fluidPage(
   # Sidebar with a slider input for number of bins 
   sidebarLayout(
     sidebarPanel(
-       textInput("Text",label=h3("Input the sentence"), value="10th ave new York"),
+       textInput("Text",label=h3("Input the sentence"), value="hey you know"),
        numericInput("n", h5("Language Models used (bigram/trigram/quadgram) :"), value=3, min=2, max=4),
        radioButtons("radio", h5("Smoothing"), choices = list("Stupid Back-off"=1, "Katz Back-off"=2), selected = 1),
        helpText("Type in a sentence above, pick the corresponding modeling algorithm, press the 'Predict' button or simply hit enter, and the result will
@@ -40,23 +40,23 @@ shinyUI(fluidPage(
                  a(href="https://en.wikipedia.org/wiki/Good%E2%80%93Turing_frequency_estimation", "(Geoffrey Sampson, 1990)"),
                  "technique to deal with unseen n-grams"),
                h4("How to use", style="color:blue"),
-               p("Input a sentence in the topleft panel, then select the number of words you'd like to see, e.g. 3 words by default 
-                 and try to find an algorithm, e.g. Stupid Back Off by default for the n-gram model. 
+               p("Input a sentence in the topleft panel, then select the language model you like to use, e.g. trigram by default 
+                 and find an algorithm, e.g. Stupid Back Off by default for the n-gram model. 
                  Then press the PREDICT button or simply hit the enter. You will see"),
-               p('next predicted word/s or a WARNING.'),
+               p('next predicted word/s or most frequent unigram words if you do not input words.'),
                h4("Explanation", style="color:blue"),
-               p("Procedure and Issues explained in the following tabs"),
+               p("Procedure and Important Notes explained in the following tabs"),
                span('The Process',style = "color:gray"),
                br(),
                span('Important Notes',style = "color:gray")
               ),
         tabPanel("Stupid Back Off Model",
-                 h5("Display top 3 words predicted", align="center"),
-                 div(tableOutput("alts1"), align="center")
+                 h5("Display top 3 words predicted"),
+                 div(tableOutput("alts1"))
                  ),
         tabPanel("Katz Back Off Model with Good-Turing Smoothing",
-                 h5("Display top 3 words predicted", align="center"),
-                 div(tableOutput("alts2"), align="center")
+                 h5("Display top 3 words predicted"),
+                 div(tableOutput("alts2"))
                  ),
         tabPanel('The Process',
                  h5('This is how it is done'),

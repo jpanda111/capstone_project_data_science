@@ -1,0 +1,12 @@
+name: shiny-app
+title: shiny-app
+username:
+account: jpanda111
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 360116
+bundleId: 1426602
+url: https://jpanda111.shinyapps.io/shiny-app/
+when: 1528863943.90986
+asMultiple: FALSE
+asStatic: FALSE
