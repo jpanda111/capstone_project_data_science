@@ -43,7 +43,7 @@ shinyUI(fluidPage(
                p("Input a sentence in the topleft panel, then select the language model you like to use, e.g. trigram by default 
                  and find an algorithm, e.g. Stupid Back Off by default for the n-gram model. 
                  Then press the PREDICT button or simply hit the enter. You will see"),
-               p('next predicted word/s or most frequent unigram words if you do not input words.'),
+               p('next predicted word/s or most frequent unigram words if you input punctuation, numbers or dirty words.'),
                h4("Explanation", style="color:blue"),
                p("Procedure and Important Notes explained in the following tabs"),
                span('The Process',style = "color:gray"),

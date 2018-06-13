@@ -30,8 +30,7 @@ preprocess_data <- function(raw) {
 
 ngram_stupid_backoff_sql <- function(raw, m=3, db) {
   
-  uniword <- c("the","on","a")
-  
+  uniword <- c("the","to","and")
   
   if (raw=="") {
     return (uniword)
@@ -70,9 +69,11 @@ ngram_stupid_backoff_sql <- function(raw, m=3, db) {
 
 ngram_katz_backoff_sql <- function(raw) {
   
+  uniword <- c("the","to","and")
+  
   # this prediction model only works for trigram!!!! So m is 3 always!!
   if (raw=="") {
-    return (c("the","to","and"))
+    return (uniword)
   } 
   
   sentence <- preprocess_data(raw) # change type from list to character
@@ -94,7 +95,7 @@ ngram_katz_backoff_sql <- function(raw) {
       return(matched[1:3])
     } else {
       # not found at all in bigram
-      if (nrow(matched)==0) return(c("the","to","and"))
+      if (nrow(matched)==0) return(uniword)
       else {
         # total less than 3 in bigram
         beta_leftover <- predicted$leftover[1]
@@ -113,7 +114,7 @@ ngram_katz_backoff_sql <- function(raw) {
         if (nrow(matched)>=3) {
           names(matched) <- c("Next_Possible_Word", "Prob_with_Good_Turing_Smoothing")
           return(matched[1:3])
-        } else return(c("the","to","and"))
+        } else return(uniword)
       }
     }
   }
@@ -150,7 +151,7 @@ ngram_katz_backoff_sql <- function(raw) {
       if (nrow(matched)>=3) {
         names(matched) <- c("Next_Possible_Word", "Prob_with_Good_Turing_Smoothing")
         return(matched[1:3])
-      } else return(c("the","to","and"))
+      } else return(uniword)
     }
   } 
   

@@ -5,8 +5,8 @@ account: jpanda111
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 360116
-bundleId: 1426602
+bundleId: 1426679
 url: https://jpanda111.shinyapps.io/shiny-app/
-when: 1528863943.90986
+when: 1528867905.98117
 asMultiple: FALSE
 asStatic: FALSE
